@@ -13,7 +13,7 @@ import * as login from "./views/login.js";
 import * as admin from "./views/admin.js";
 // 헤더 기체 선택기 — 라우트 뷰가 아니다. 기체 탭(aircraft)은 문서 편집, 이것은 선택
 import * as profilepick from "./views/profilepick.js";
-import { loadSelection, setSelection } from "./lib/profile.js";
+import { loadSelection, setSelection, startSelection } from "./lib/profile.js";
 import * as aircraft from "./views/aircraft.js";
 import * as autocode from "./views/autocode.js";
 import * as autodesign from "./views/autodesign.js";
@@ -77,8 +77,9 @@ async function refreshHealth() {
 // 끝나야 아래가 돈다. 라우팅·헬스·크롬이 게이트보다 먼저 API를 쏘면 401 이벤트가
 // 게이트와 경합하므로 **전부 게이트 뒤**다 (top-level await — ES 모듈이라 가능)
 await login.gate();
-// 기체 선택은 첫 요청보다 먼저 읽는다 — 라우팅이 뷰를 그리자마자 계산 요청을 보낸다 (lib/profile.js)
-setSelection(loadSelection(profilepick.browserStorage()));
+// 기체 선택은 첫 요청보다 먼저 읽는다 — 라우팅이 뷰를 그리자마자 계산 요청을 보낸다 (lib/profile.js).
+// 고른 적이 없으면 처음 시작 기체(표적기) — 서버에 없으면 헤더가 사유 없이 예제로 되돌린다
+setSelection(startSelection(loadSelection(profilepick.browserStorage())));
 window.addEventListener("hashchange", route);
 route();
 refreshHealth();

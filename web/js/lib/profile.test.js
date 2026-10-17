@@ -4,9 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  COMPUTE_GET, COMPUTE_POST, EXAMPLE_ID, NOT_AIRCRAFT, STORAGE_KEY,
-  currentSelection, loadSelection, normalizeSelection, profileRef, sameSelection, saveSelection,
-  selectionProblem, setSelection, withProfile,
+  COMPUTE_GET, COMPUTE_POST, EXAMPLE_ID, NOT_AIRCRAFT, START_ID, STORAGE_KEY,
+  currentSelection, isStartDefault, loadSelection, normalizeSelection, profileRef, sameSelection, saveSelection,
+  selectionProblem, setSelection, startSelection, withProfile,
 } from "./profile.js";
 
 const fakeStorage = (init = {}) => {
@@ -220,5 +220,24 @@ test("가상환경 번들은 계산 라우트를 부르지 않는다 — 기체 
         }
       }
     }
+  }
+});
+
+test("처음 시작 기체 — 고른 적이 없으면 표적기(서버가 심는 기체), 고른 적이 있으면(예제 포함) 그 선택", () => {
+  assert.equal(START_ID, "banshee-jet80");                 // server ProfileStore.seed가 심는 id (02 §5.6.3)
+  try {
+    setSelection(startSelection(loadSelection(fakeStorage())));
+    assert.deepEqual(currentSelection(), { id: START_ID, variant: null });
+    assert.equal(isStartDefault(), true);
+    assert.deepEqual(profileRef(), { id: START_ID }, "계산 요청에도 실린다 — 화면과 계산이 같은 기체");
+    // 예제를 고른 사람은 예제로 — 고른 선택은 저장돼 기본을 이긴다
+    const st = fakeStorage({ [STORAGE_KEY]: JSON.stringify({ id: EXAMPLE_ID }) });
+    setSelection(startSelection(loadSelection(st)));
+    assert.deepEqual(currentSelection(), { id: EXAMPLE_ID, variant: null });
+    assert.equal(isStartDefault(), false);
+    setSelection({ id: "heavy" });
+    assert.equal(isStartDefault(), false, "평범한 선택은 기본이 아니다");
+  } finally {
+    setSelection(null);
   }
 });

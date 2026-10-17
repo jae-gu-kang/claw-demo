@@ -13,8 +13,8 @@
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
 import {
-  EXAMPLE_ID, currentSelection, normalizeSelection, sameSelection, saveSelection, selectionProblem,
-  setSelection,
+  EXAMPLE_ID, currentSelection, isStartDefault, normalizeSelection, sameSelection, saveSelection,
+  selectionProblem, setSelection,
 } from "../lib/profile.js";
 import { effectiveOf } from "../lib/profileform.js";
 
@@ -140,6 +140,13 @@ export function reconcile(list, {
 } = {}) {
   const problem = selectionProblem(list, currentSelection());
   if (!problem) return null;
+  if (isStartDefault()) {
+    // 처음 시작 기체가 서버에 없다(심기를 끈 서버·지운 기체) — 사용자가 고른 적 없는 선택이라 사유 배지 없이
+    // 예제로. 첫 탭은 그 기체로 그려졌으니 한 번 다시 그린다.
+    setSelection(null);
+    redraw();
+    return null;
+  }
   notice = `${problem} — 예제 기체로 되돌렸습니다. 공개 데모처럼 저장소가 재시작마다 비워지는 서버에서는 `
     + "저장한 기체가 사라질 수 있습니다.";
   setSelection(null);

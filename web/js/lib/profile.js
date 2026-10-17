@@ -13,6 +13,10 @@
 
 export const EXAMPLE_ID = "example-delta";
 export const STORAGE_KEY = "claw.profile";
+/** 처음 시작 기체 — 한 번도 고르지 않았을 때(저장된 선택 없음) 헤더가 고르는 표적기. 서버가 기동할 때 심는다
+ *  (server ProfileStore.seed, 02 §5.6.3). **저장하지 않는다** — 사용자가 고르면(예제 포함) 그 선택이 저장돼 이
+ *  기본을 이긴다. 서버 목록에 없으면(심기를 끈 서버·지운 기체) 사유 없이 예제로 돌아간다(profilepick reconcile). */
+export const START_ID = "banshee-jet80";
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/; // 서버 기체 id 규칙과 같다(`_` 시작은 저장소가 거부)
 
@@ -131,12 +135,21 @@ export function saveSelection(storage, sel) {
 }
 
 let selection = null;
+let startDefault = false; // 지금 선택이 사용자가 고른 것이 아니라 처음 시작 기체인가
+const START = Symbol("start-default");
 
 export const currentSelection = () => selection;
+export const isStartDefault = () => startDefault;
 
 export function setSelection(sel) {
   selection = normalizeSelection(sel);
+  startDefault = selection != null && sel?.[START] === true;
   return selection;
+}
+
+/** 부팅 선택 — 저장된 선택이 있으면 그것, 없으면 처음 시작 기체(표지만 달고 저장하지 않는다). */
+export function startSelection(stored) {
+  return normalizeSelection(stored) ?? { id: START_ID, variant: null, [START]: true };
 }
 
 /** 요청에 싣는 기체 선택 — 고르지 않았으면 null. */

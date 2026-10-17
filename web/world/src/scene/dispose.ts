@@ -15,7 +15,10 @@ import type { Object3D } from "three";
 export function disposeMaterial(mat: unknown): void {
   const m = mat as (Record<string, unknown> & { dispose?: () => void }) | null;
   if (m == null) return;
-  for (const v of Object.values(m)) {
+  for (const [k, v] of Object.entries(m)) {
+    // envMap은 재질 것이 아니다 — 장면이 구운 하늘 환경광을 모델 재질 전부가 함께 꽂는다(SceneHost·setModelEnvironment).
+    // 기체를 갈아 끼울 때 여기서 놓으면 남은 모델(발사관)의 환경광을 장면 몰래 파괴한다. 주인은 SceneHost.dispose다.
+    if (k === "envMap") continue;
     if (v && typeof v === "object" && "isTexture" in v) {
       (v as { dispose?: () => void }).dispose?.();
     }

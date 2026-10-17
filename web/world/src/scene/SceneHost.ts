@@ -16,13 +16,13 @@
  */
 
 import {
-  ACESFilmicToneMapping, Box3, BufferAttribute, BufferGeometry, ClampToEdgeWrapping, Color, DataTexture,
-  DataUtils, DirectionalLight, HalfFloatType, LinearFilter,
-  PCFSoftShadowMap,
-  Group, HemisphereLight, LineBasicMaterial, LineSegments, Matrix4, Mesh,
+  ACESFilmicToneMapping, Box3, BufferAttribute, BufferGeometry, CircleGeometry, ClampToEdgeWrapping, Color,
+  DataTexture, DataUtils, DirectionalLight, HalfFloatType, LinearFilter,
+  PCFSoftShadowMap, PMREMGenerator,
+  Group, HemisphereLight, LineBasicMaterial, LineSegments, Matrix4, Mesh, MeshBasicMaterial,
   MeshStandardMaterial, PerspectiveCamera, Raycaster, RedFormat, Scene, Sphere, SphereGeometry,
   SRGBColorSpace, Vector2, Vector3, Vector4,
-  WebGLRenderer,
+  WebGLRenderer, type WebGLRenderTarget,
 } from "three";
 
 import { toWorld } from "./axes.ts";
@@ -40,6 +40,12 @@ import { runwayUniformValues, type RunwaySurface } from "../core/runway.ts";
 import type { CoastField } from "../core/coastfield.ts";
 import { createOcean, type Ocean, type SeaState } from "./ocean.ts";
 import { createSky, type Sky } from "./sky.ts";
+import { setModelEnvironment } from "./models.ts";
+
+/** 모델 환경광 세기 — 반구광(지형과 같이 쓰는 주변광)이 모델에도 이미 들어가므로 1보다 낮게 둔다. 표시용 선택이다. */
+const MODEL_ENV_INTENSITY = 0.6;
+/** 모델 환경광의 땅 반사율(풀·흙 근사, 선형) — 밑면·옆면이 비추는 아래 반구. 표시용 근사다. */
+const ENV_GROUND_ALBEDO = [0.10, 0.10, 0.075] as const;
 
 /** 깊이 정책 — **분할 프러스텀**. 로그 깊이버퍼를 쓰지 않는다.
  *
@@ -194,6 +200,13 @@ export class SceneHost {
   private readonly ocean: Ocean;
   private readonly sun: DirectionalLight;
   private readonly ambient: HemisphereLight;
+  /** 모델 환경광 — 하늘(구름 포함)과 그 아래 땅을 PMREM으로 굽는다. `setEnvironment`가 더럽히고 다음 `render`가
+   *  **한 번** 굽는다 — 시각·구름 슬라이더를 끌면 한 프레임에 여러 번 불린다. */
+  private readonly pmrem: PMREMGenerator;
+  private readonly envScene = new Scene();
+  private readonly envGround: Mesh<CircleGeometry, MeshBasicMaterial>;
+  private envTarget: WebGLRenderTarget | null = null;
+  private envDirty = true;
   private readonly groups = {
     terrain: new Group(), paths: new Group(), models: new Group(), marks: new Group(),
     // 활주로 선 — 궤적과 따로 단다. 게임 모드는 궤적을 숨겨도 활주로 선은 보인다(setViewStyle)
@@ -276,6 +289,16 @@ export class SceneHost {
 
     this.sky = createSky(SKY_RADIUS);
     this.scene.add(this.sky.mesh);
+    // 환경광 장면 — 같은 하늘 재질(공유 유니폼: 태양·구름)을 원점에 하나 더 두고, 수평선 아래는 어두운 땅 원판으로
+    // 막는다. 하늘 셰이더의 아래쪽은 먼바다라, 그대로 두면 육지 위 기체 밑면이 바다색을 비춘다.
+    this.pmrem = new PMREMGenerator(this.renderer);
+    const envSky = new Mesh(this.sky.mesh.geometry, this.sky.mesh.material);
+    envSky.frustumCulled = false;
+    envSky.renderOrder = this.sky.mesh.renderOrder;
+    this.envGround = new Mesh(new CircleGeometry(80, 48), new MeshBasicMaterial({ color: 0x000000 }));
+    this.envGround.rotation.x = -Math.PI / 2;
+    this.envGround.position.y = -2;  // 원판 끝이 수평선 1.4° 아래 — 지평 하늘은 하늘 셰이더 몫
+    this.envScene.add(envSky, this.envGround);
     // 해면은 **두 패스에 다 그린다** — 발밑부터 수평선까지 걸쳐 있어 어느 한쪽에만
     // 두면 그 구간에서 사라진다. 불투명이라 겹침 구간에서 두 번 그려도 결과가 같다.
     this.ocean = createOcean({ maxDist: FAR * 0.98 });
@@ -374,6 +397,15 @@ export class SceneHost {
       sea.windSpeed * Math.cos(sea.windDir), sea.windSpeed * Math.sin(sea.windDir),
     ]);
     this.renderer.toneMappingExposure = exposure;
+    // 환경광의 땅 — 반사율 × (직사광 + 하늘빛) / π. 해가 지면 같이 어두워진다.
+    const sky = 0.8 * this.ambient.intensity;
+    const lit = intensity * Math.max(Math.sin(el), 0);
+    this.envGround.material.color.setRGB(
+      (ENV_GROUND_ALBEDO[0] * (sunColor[0] * lit + sky)) / Math.PI,
+      (ENV_GROUND_ALBEDO[1] * (sunColor[1] * lit + sky)) / Math.PI,
+      (ENV_GROUND_ALBEDO[2] * (sunColor[2] * lit + sky)) / Math.PI,
+    );
+    this.envDirty = true;
   }
 
   /** NED 기하 → three 지오메트리 — NaN 정점 방어·축 변환·(있으면) 색 굽기를 한 곳에 둔다.
@@ -681,6 +713,17 @@ export class SceneHost {
   render(cam: CameraPose, timeSec: number): void {
     if (this.disposed || this.post == null) return;
     const t0 = performance.now();
+    // **그림자 갱신 표지보다 먼저** 굽는다 — PMREM도 render()를 부른다. 지금은 환경 장면에 빛이 없어 그림자 맵이
+    // 표지를 건드리지 않지만(빛 0이면 일찍 돌아간다), 환경 장면에 빛을 하나라도 넣는 순간 표지를 소모해 이 프레임의
+    // 기체 그림자가 갱신되지 않는다. 순서로 그 가능성을 닫는다.
+    if (this.envDirty) {
+      this.envDirty = false;
+      this.envTarget?.dispose();
+      this.envTarget = this.pmrem.fromScene(this.envScene, 0, 0.1, 200);
+    }
+    // 새로 실린 모델(결과·발사관이 바뀌면 SceneController가 그룹에 넣는다)도 다음 프레임에 받는다. 같은 텍스처면
+    // 아무것도 안 바꾸므로 매 프레임 불러도 싸다(models.ts).
+    setModelEnvironment(this.groups.models, this.envTarget?.texture ?? null, MODEL_ENV_INTENSITY);
     const eye = toWorld(cam.eye[0]!, cam.eye[1]!, cam.eye[2]!);
     const target = toWorld(cam.target[0]!, cam.target[1]!, cam.target[2]!);
     const up = toWorld(cam.up[0]!, cam.up[1]!, cam.up[2]!);
@@ -759,6 +802,12 @@ export class SceneHost {
     for (const g of Object.values(this.groups)) disposeTree(g);
     for (const t of this.heightTextures) t.dispose();
     this.heightTextures = [];
+    this.envTarget?.dispose();
+    this.envTarget = null;
+    this.pmrem.dispose();
+    this.envGround.geometry.dispose();
+    this.envGround.material.dispose();
+    this.envScene.clear();
     this.sky.dispose();
     this.ocean.dispose();
     this.scene.clear();

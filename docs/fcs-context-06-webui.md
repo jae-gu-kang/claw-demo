@@ -1054,7 +1054,10 @@ alt, mach)이다
   `COMPUTE_POST`·`COMPUTE_GET`이고 `api.js`가 요청마다 적용한다(본문 `profile`, GET은
   `profile_id` 쿼리). 리비전은 싣지 않는다 — 고치면 다음 계산부터 최신이 쓰이고, 어느
   리비전이었는지는 결과의 `profile` 블록이 말한다. 고르지 않았으면 싣지 않는다(서버가 예제로
-  계산하고 `default-example`로 말한다). 가드는 `lib/profile.test.js`다 — 서버 라우트 전부를
+  계산하고 `default-example`로 말한다). **처음 시작 기체는 표적기다** — 한 번도 고르지 않았으면(저장된 선택
+  없음) 헤더가 서버가 심는 `banshee-jet80`(02 §5.6.3)을 고르고 요청에 싣는다(`START_ID`·`startSelection`).
+  저장하지 않으므로 사용자가 고른 선택(예제 포함)이 늘 이긴다. 서버 목록에 없으면(심기를 끈 서버·지운 기체)
+  사용자가 고른 적 없는 선택이라 「선택 복원」 배지 없이 예제로 돌아간다. 가드는 `lib/profile.test.js`다 — 서버 라우트 전부를
   원문에서 읽어, 기체를 받는 라우트(`resolve_profile`·`profile_query`)와 웹 목록이 일치하는지,
   나머지가 사유와 함께 `NOT_AIRCRAFT`에 있는지 본다. 새 계산 라우트가 웹에서 기체 없이 불려
   조용히 예제로 계산되는 것을 막는다

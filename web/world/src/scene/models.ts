@@ -21,7 +21,7 @@
 
 import {
   Box3, CircleGeometry, DoubleSide, Group, Matrix4, Mesh as ThreeMesh, MeshBasicMaterial,
-  Vector3, type Material, type Mesh, type Object3D,
+  Vector3, type Material, type Mesh, type MeshStandardMaterial, type Object3D, type Texture,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
@@ -30,7 +30,6 @@ import { modelColumnsNed } from "../core/modelaxes.ts";
 import type { LauncherPose } from "../core/launcher.ts";
 import { driveNodesFor, surfaceNodeRotations, type SurfacePose } from "../core/surfaces.ts";
 import { applyAerialPerspective } from "./atmosphere.ts";
-import { WEAR_BY_MATERIAL, applyWear } from "./materials.ts";
 import { disposeTree } from "./dispose.ts";
 import { toWorld } from "./axes.ts";
 
@@ -42,6 +41,31 @@ export function vehicleDriveNodes(scene: Object3D): { expect: string[]; unknown:
     if (declared === undefined && o.userData?.claw_drive_nodes !== undefined) declared = o.userData.claw_drive_nodes;
   });
   return driveNodesFor(declared);
+}
+
+/** 하늘 환경광을 모델의 PBR 재질(표준·물리)에 꽂는다 — 도장 광택·클리어코트·금속이 하늘과 땅을 비춘다.
+ *  환경광이 없으면 금속은 직사광 하이라이트만 남아 검게, 반광 도장은 플라스틱처럼 읽힌다. 장면 전체(지형)가 아니라
+ *  모델에만 거는 까닭: 지형은 하늘 열림·피복 셰이더가 자기 환경광을 이미 셈한다(shaders/ground.ts).
+ *
+ *  돌려주는 값은 텍스처를 갈아 끼운 재질 수다. 붙이거나 뗄 때만 프로그램을 다시 짠다(`needsUpdate`) — 다시 구운
+ *  텍스처로 갈아 끼우는 것은 유니폼만 바뀐다. 호출측(`SceneHost`)이 매 프레임 불러도 싸다. */
+export function setModelEnvironment(root: Object3D, env: Texture | null, intensity: number): number {
+  let changed = 0;
+  root.traverse((o) => {
+    const m = (o as Mesh).material as Material | Material[] | undefined;
+    if (!m) return;
+    for (const one of Array.isArray(m) ? m : [m]) {
+      const std = one as MeshStandardMaterial;
+      if (!std.isMeshStandardMaterial) continue;
+      if (std.envMap !== env) {
+        if ((std.envMap == null) !== (env == null)) std.needsUpdate = true;
+        std.envMap = env;
+        changed += 1;
+      }
+      std.envMapIntensity = intensity;
+    }
+  });
+  return changed;
 }
 
 /** 발사관에서 우리가 모는 노드 — `models/launcher/README.md`가 정본. */
@@ -93,11 +117,10 @@ export async function loadModel(
   // 기체 루트만 `setVehiclePose`가 행렬을 직접 쓰면서 그 자리에서 끈다.
   gltf.scene.matrixAutoUpdate = true;
 
-  // **GLB 재질에 마모와 대기를 건다.** 대기를 빠뜨리면 30 km 밖 지형이 하늘로 녹아드는데
-  // 기체만 또렷하게 남아, 배경에서 오려 붙인 것처럼 보인다. 마모는 재질 **이름**으로
-  // 조회한다 — 이름이 목록에 없으면 민짜로 남을 뿐 실패하지 않는다(관 안쪽처럼 일부러
-  // 뺀 것과 구별할 수 없기 때문에, 조용히 넘기는 쪽이 맞다). 재질은 한 GLB 안에서
-  // 메시끼리 공유되기도 하므로 두 패처 모두 중복 호출을 흡수한다.
+  // **GLB 재질에 대기를 건다.** 빠뜨리면 30 km 밖 지형이 하늘로 녹아드는데 기체만 또렷하게
+  // 남아, 배경에서 오려 붙인 것처럼 보인다. 그 밖의 표시 효과는 얹지 않는다 — 절차 마모는
+  // 인위적으로 읽혀 걷어 냈고(materials.ts 머리말), 실감은 모델 형상과 하늘 환경광이 낸다
+  // (`setModelEnvironment`). 재질은 메시끼리 공유되기도 하므로 패처는 중복 호출을 흡수한다.
   gltf.scene.traverse((o) => {
     const m = (o as Mesh).material as Material | Material[] | undefined;
     if (!m) return;
@@ -105,11 +128,7 @@ export async function loadModel(
     // 가장 싼 단서다. 캐스터가 GLB뿐이라 그림자 패스 비용도 GLB 삼각형만큼이다.
     o.castShadow = true;
     o.receiveShadow = true;
-    for (const one of Array.isArray(m) ? m : [m]) {
-      const wear = WEAR_BY_MATERIAL[one.name];
-      if (wear) applyWear(one, wear);
-      applyAerialPerspective(one);
-    }
+    for (const one of Array.isArray(m) ? m : [m]) applyAerialPerspective(one);
   });
 
   return {

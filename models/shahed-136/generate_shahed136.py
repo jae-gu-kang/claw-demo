@@ -34,6 +34,7 @@ SUFFIX = "_" + VARIANT if VARIANT else ""
 # 사유·증상·복구는 models/blender_numpy.py 참조. **bpy.ops 호출 전에** 부른다.
 sys.path.insert(0, os.path.dirname(OUT_DIR))  # models/
 from blender_numpy import ensure_numpy  # noqa: E402
+import detail_kit as kit  # noqa: E402 — 표면 디테일(판·글자·이음선·볼트), models/detail_kit.py
 
 ensure_numpy(repo_root=os.path.dirname(os.path.dirname(OUT_DIR)))
 
@@ -129,13 +130,16 @@ def airfoil_ring(x, y_le, y_te, t, zc, n=12):
     return pts
 
 
-def make_mat(name, color, rough=0.55, metal=0.0):
+def make_mat(name, color, rough=0.55, metal=0.0, coat=0.0):
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     bsdf = m.node_tree.nodes.get("Principled BSDF")
     bsdf.inputs["Base Color"].default_value = (*color, 1.0)
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metal
+    if coat:                                    # 클리어코트 — glTF KHR_materials_clearcoat로 나가 three가 읽는다
+        bsdf.inputs["Coat Weight"].default_value = coat
+        bsdf.inputs["Coat Roughness"].default_value = 0.10
     m.diffuse_color = (*color, 1.0)
     return m
 
@@ -198,9 +202,9 @@ def tube(bm, points, r, n=8):
 
 
 # ---------------------------------------------------------------- 재질
-MAT_AIRFRAME = make_mat("Airframe", (0.615, 0.625, 0.600), rough=0.55)
+MAT_AIRFRAME = make_mat("Airframe", (0.560, 0.570, 0.548), rough=0.46, coat=0.12)  # 반광 도장
 MAT_DARK = make_mat("DarkDetail", (0.055, 0.058, 0.062), rough=0.45)
-MAT_CTRL = make_mat("ControlSurface", (0.430, 0.450, 0.435), rough=0.55)
+MAT_CTRL = make_mat("ControlSurface", (0.430, 0.450, 0.435), rough=0.50, coat=0.08)
 
 # ---------------------------------------------------------------- 동체
 bm = bmesh.new()
@@ -311,9 +315,11 @@ for sx, side in ((1.0, "R"), (-1.0, "L")):
             rings.append([(lx, -0.006, 0.012), (lx, -0.190, 0.002),
                           (lx, -0.190, -0.002), (lx, -0.006, -0.012)])
         loft(bm, rings)
+        # 조종 혼 — 아랫면 힌지 가까이 선 얇은 판(엘레본과 함께 돈다). 서보 덮개(날개 아랫면)가 그 앞에 있다
+        kit.paint(kit.rounded_box(bm, (-0.0035, -0.058, -0.034), (0.0035, -0.010, -0.006), 0.0015), 1)
         # 밑줄 이름 — glTF/three.js는 노드 이름의 점(.)을 지운다. 밑줄은 보존되므로
         # Blender와 three.js에서 같은 이름(Elevon_In_L …)으로 조회된다.
-        ob = finish_bm("Elevon_%s_%s" % (seg, side), bm, [MAT_CTRL], col_model)
+        ob = finish_bm("Elevon_%s_%s" % (seg, side), bm, [MAT_CTRL, MAT_DARK], col_model)
         ob.location = (sx * xc, -1.262, WING_ZC)      # 원점 = 힌지선 위
         elevons[seg + side] = ob
 
@@ -614,6 +620,118 @@ if EOIR:
     col_model.objects.link(pan)
     pan.location = EOIR_C
     eoir = {"pan": pan, "tilt": tilt}
+
+# ---------------------------------------------------------------- 표면 디테일 (banshee와 같은 방법)
+# 텍스처 0장 규칙이라 실감은 형상에서 낸다: 동체 이음선, 나사 둘린 점검판, 연료 주입구, 스텐실, 피토관·안테나,
+# 날개 리벳 줄·서보 덮개, 핀 끝 항법등. 점마다 대상 메시에 광선을 쏘아 곡면에 앉힌다(models/detail_kit.py).
+# 바깥이 쓰는 값은 건드리지 않는다 — 기수 끝(기본형 y 1.75)·최후방(프로펠러 너트)·노드 이름·타면 피벗.
+MAT_MARK = make_mat("Shahed_Marking", (0.028, 0.030, 0.033), rough=0.60)     # 검은 스텐실
+MAT_SEAM = make_mat("Shahed_Seam", (0.120, 0.125, 0.128), rough=0.65)        # 패널 이음·판 테두리
+MAT_FAST = make_mat("Fastener", (0.560, 0.565, 0.570), rough=0.32, metal=1.0)
+MAT_LAMP_R = make_mat("Lamp_Red", (0.700, 0.030, 0.020), rough=0.12)
+MAT_LAMP_G = make_mat("Lamp_Green", (0.030, 0.500, 0.120), rough=0.12)
+MAT_PANEL = make_mat("Airframe_Panel", (0.500, 0.512, 0.494), rough=0.50, coat=0.08)  # 갈아 끼운 판 — 한 톤 어둡다
+MAT_WARN = make_mat("Shahed_Warning", (0.560, 0.040, 0.030), rough=0.50)     # 붉은 경고 스텐실
+FONT = kit.first_font()
+UP, DOWN = (0.0, 0.0, -1.0), (0.0, 0.0, 1.0)     # 투영 방향 — 위에서 아래로 / 아래에서 위로
+
+
+def decorate(ob, fn):
+    """완성된 오브젝트에 디테일을 붙이고(detail_kit.decorate) 각진 모서리를 다시 표시한다. 붙이는 오브젝트는
+    전부 원점에 있다(동체·날개·핀) — 좌표를 그대로 쓰고 월드→로컬 변환(L)은 받기만 한다."""
+    kit.decorate(ob, lambda bm, surf, slot, _L: fn(bm, surf, slot))
+    shade_smooth(ob)
+
+
+def screw_ring(w, h, r, inset, n, frame):
+    return kit.on_frame(frame, kit.resample_closed(kit.rounded_rect(w - 2 * inset, h - 2 * inset,
+                                                                    max(r - inset, 0.004)), n))
+
+
+def hatch(bm, surf, slot, w, h, r, frame, d, screws):
+    """나사 둘린 점검판 — 윗면은 기체색, 테두리는 이음선색."""
+    part = kit.plate(bm, surf, w, h, r, frame, d)
+    kit.paint(part["top"] + part["bottom"], slot(MAT_PANEL), smooth=True)
+    kit.paint(part["side"], slot(MAT_SEAM))
+    kit.paint(kit.bolts(bm, surf, screw_ring(w, h, r, 0.011, screws, frame), d, r=0.0032, h=0.0030,
+                        hexagon=False), slot(MAT_FAST), smooth=True)
+
+
+def fuselage_details(bm, surf, slot):
+    seam, mark, dark, fast = slot(MAT_SEAM), slot(MAT_MARK), slot(MAT_DARK), slot(MAT_FAST)
+    # 둘레 이음선 — 기수부·꼬리부 이음(기본형은 원추 기수 이음도). 축에서 바깥 원으로 쏜다
+    for y in ((1.235, 0.93, -1.06) if not EOIR else (0.93, -1.06)):
+        ang = [2.0 * math.pi * k / 96 for k in range(96)]
+        path = [(0.6 * math.cos(a), y, 0.6 * math.sin(a)) for a in ang]
+        dirs = [(-math.cos(a), 0.0, -math.sin(a)) for a in ang]
+        kit.paint(kit.ribbon(bm, surf, path, dirs, 0.0035, closed=True), seam)
+    # 윗면 점검판(항전 베이) — 기수 이음과 안테나 돔 사이
+    hatch(bm, surf, slot, 0.20, 0.30, 0.028, ((0.0, 0.50, 0.6), (1, 0, 0), (0, 1, 0)), UP, 12)
+    hatch(bm, surf, slot, 0.16, 0.20, 0.022, ((0.0, -0.95, 0.6), (1, 0, 0), (0, 1, 0)), UP, 10)
+    # 연료 주입구 — 링 + 캡 + 「FUEL」
+    cap = ((0.0, -0.12, 0.6), (1, 0, 0), (0, 1, 0))
+    kit.paint(kit.disc(bm, surf, 0.034, cap, UP, thick=0.003), seam, smooth=True)
+    kit.paint(kit.disc(bm, surf, 0.024, cap, UP, thick=0.006), fast, smooth=True)
+    kit.paint(kit.stencil(bm, surf, "FUEL", FONT, 0.020, ((0.0, -0.20, 0.6), (1, 0, 0), (0, 1, 0)), UP),
+              mark)
+    # 옆면 기체 번호 — 날개 앞전 위. 우현은 꼬리→기수로, 좌현은 기수→꼬리로 읽힌다(밖에서 볼 때 왼쪽→오른쪽)
+    for sx in (1.0, -1.0):
+        frame = ((sx * 0.6, 0.62, 0.10), (0.0, sx, 0.0), (0.0, 0.0, 1.0))
+        kit.paint(kit.stencil(bm, surf, "CLAW-07", FONT, 0.052, frame, (-sx, 0.0, 0.0), x_scale=1.05), mark)
+        # 프로펠러 경고 — 방화벽 앞 옆면, 붉은 글자
+        frame = ((sx * 0.6, -1.16, 0.07), (0.0, sx, 0.0), (0.0, 0.0, 1.0))
+        kit.paint(kit.stencil(bm, surf, "DANGER  PROPELLER", FONT, 0.020, frame, (-sx, 0.0, 0.0),
+                              spacing=1.08), slot(MAT_WARN))
+    # 피토관 — 기수 아래 마스트에서 앞으로(기수 끝보다 한참 뒤에서 끝난다)
+    kit.paint(kit.tube(bm, [(0.0, 0.88, -0.14), (0.0, 0.95, -0.200), (0.0, 0.99, -0.212),
+                            (0.0, 1.17, -0.212)], 0.0042, n=10), fast, smooth=True)
+    # 아랫면 블레이드 안테나 2개(통신·GNSS)
+    for y0 in (-0.30, -0.78):
+        kit.paint(kit.rounded_box(bm, (-0.0035, y0 - 0.055, -0.300), (0.0035, y0, -0.200), 0.003), dark)
+
+
+def wing_details(bm, surf, slot):
+    seam, mark, fast = slot(MAT_SEAM), slot(MAT_MARK), slot(MAT_FAST)
+    for sx in (1.0, -1.0):
+        # 동체 접합 볼트 줄 — 윗면, 동체 옆(반폭 0.29) 바로 바깥
+        x = sx * 0.32
+        pts = kit.spaced((x, y_le(0.32) - 0.05, 0.4), (x, Y_TE + 0.05, 0.4), 0.08)
+        kit.paint(kit.bolts(bm, surf, pts, UP, r=0.0030, h=0.0016, hexagon=False), fast, smooth=True)
+        # 윗면 점검판 + 「NO STEP」
+        hatch(bm, surf, slot, 0.15, 0.12, 0.018, ((sx * 0.80, -0.78, 0.4), (1, 0, 0), (0, 1, 0)), UP, 8)
+        kit.paint(kit.stencil(bm, surf, "NO STEP", FONT, 0.024,
+                              ((sx * 0.52, -0.42, 0.4), (1, 0, 0), (0, 1, 0)), UP, spacing=1.1), mark)
+        for xc in (0.565, 0.935):
+            # 엘레본 앞 「NO HAND」(banshee와 같은 자리) — 힌지선 −1.262 바로 앞
+            kit.paint(kit.stencil(bm, surf, "NO HAND", FONT, 0.011,
+                                  ((sx * xc, -1.228, 0.4), (1, 0, 0), (0, 1, 0)), UP, spacing=1.1), mark)
+            # 아랫면 서보 덮개 — 조종 혼 바로 앞
+            hatch(bm, surf, slot, 0.10, 0.065, 0.012, ((sx * xc, -1.17, -0.4), (1, 0, 0), (0, -1, 0)),
+                  DOWN, 4)
+        # 날개 이음선 — 엘레본 절개 안쪽 끝에서 앞으로(외판 이음)
+        xs = sx * 0.38
+        path = [(xs, y, 0.4) for y in [y_le(0.38) - 0.02 - k * (y_le(0.38) - 0.02 + 1.25) / 40 for k in range(41)]]
+        kit.paint(kit.ribbon(bm, surf, path, [UP] * len(path), 0.003), seam)
+
+
+def fin_details(sx):
+    def fn(bm, surf, slot):
+        # 핀 바깥면 꼬리 번호 — 밖에서 볼 때 왼쪽→오른쪽
+        frame = ((sx * 1.6, -1.30, WING_ZC + 0.16), (0.0, sx, 0.0), (0.0, 0.0, 1.0))
+        kit.paint(kit.stencil(bm, surf, "07", FONT, 0.110, frame, (-sx, 0.0, 0.0)), slot(MAT_MARK))
+        lamp = slot(MAT_LAMP_G if sx > 0 else MAT_LAMP_R)       # 우현 초록 · 좌현 빨강
+        loc, n = surf.hit((sx * 1.6, -0.98, WING_ZC + 0.01), (-sx, 0.0, 0.0))
+        kit.paint(kit.lathe(bm, loc - n * 0.002, n, [(0.0, 0.013), (0.005, 0.013), (0.010, 0.009),
+                                                     (0.013, 0.0)], n=16), lamp, smooth=True)
+    return fn
+
+
+decorate(fuselage, fuselage_details)
+decorate(wing, wing_details)
+for sx, tag in ((1.0, "R"), (-1.0, "L")):
+    decorate(fins[tag], fin_details(sx))
+for ob in [*elevons.values(), *rudders.values()]:
+    shade_smooth(ob)
 
 # ---------------------------------------------------------------- 루트 엠프티 + 계층
 root = bpy.data.objects.new("SHAHED136_Root", None)

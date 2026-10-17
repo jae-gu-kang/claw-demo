@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { STORAGE_KEY, currentSelection, setSelection } from "../lib/profile.js";
+import { STORAGE_KEY, currentSelection, setSelection, startSelection } from "../lib/profile.js";
 import { reconcile, restoredNotice, selectedDocument, switchSelection, switchTo } from "./profilepick.js";
 
 const memStorage = () => {
@@ -95,6 +95,28 @@ test("사라진 선택은 예제로 되돌리고 사유를 남기고 한 번 다
     assert.equal(redraws, 1);
     assert.equal(restoredNotice(), n);
     assert.equal(reconcile(list, { storage: st, redraw }), null, "되돌린 뒤에는 할 일이 없다 — 다시 그리기 고리가 없다");
+    assert.equal(redraws, 1);
+  } finally {
+    setSelection(null);
+  }
+});
+
+test("처음 시작 기체가 서버에 없으면 사유 없이 예제로 — 사용자가 고른 적 없는 선택이다", () => {
+  let redraws = 0;
+  const redraw = () => { redraws += 1; };
+  const before = restoredNotice();
+  try {
+    const st = memStorage();
+    setSelection(startSelection(null));                    // 저장된 선택 없음 → 표적기
+    // 심기를 끈 서버·사용자가 지운 기체 — 목록에 없다
+    assert.equal(reconcile([{ id: "example-delta", name: "예제", variants: [] }], { storage: st, redraw }), null);
+    assert.equal(currentSelection(), null);
+    assert.equal(redraws, 1, "첫 탭이 표적기로 그려졌으니 한 번 다시 그린다");
+    assert.equal(restoredNotice(), before, "「선택 복원」 배지를 세우지 않는다");
+    // 있으면 그대로 — 다시 그리지 않는다
+    setSelection(startSelection(null));
+    assert.equal(reconcile([{ id: "banshee-jet80", name: "Banshee", variants: [] }], { storage: st, redraw }), null);
+    assert.deepEqual(currentSelection(), { id: "banshee-jet80", variant: null });
     assert.equal(redraws, 1);
   } finally {
     setSelection(null);

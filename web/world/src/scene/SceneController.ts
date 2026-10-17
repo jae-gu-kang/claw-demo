@@ -31,7 +31,6 @@ import { refLabel, runProfileRef, siteRunwayWidth, strideFor } from "../lib/repl
 import { runwayDrawing } from "../core/runway.ts";
 import { floorWeight, runwayFloorOf, sameFloor, type RunwayFloor } from "../core/runwayfloor.ts";
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
-import { WEAR_NOTES } from "./materials.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
 import { propellerRate, surfaceDisplayNotes, surfacePose } from "../core/surfaces.ts";
 import { WAVE_NOTES } from "../core/waves.ts";
@@ -597,8 +596,6 @@ export class SceneController {
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model, CLOUD_NOTES.shadows);
-    // 마모는 GLB 재질에만 건다(도식은 도장이 아니다 — schematic.ts)
-    if (this.vehicleKind === "model" || this.launcher) notes.push(WEAR_NOTES.model);
     const scale = this.host.getRenderScale();
     if (scale < 1) {
       notes.push(

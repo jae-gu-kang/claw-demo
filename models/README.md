@@ -7,6 +7,8 @@
 models/
   blender_numpy.py        블렌더 내장 numpy 보정 (아래)
   test_blender_numpy.py   그 테스트 — `pytest models`
+  detail_kit.py           표면 디테일 도구 — 곡면에 앉는 판·스텐실·이음선·볼트, 둥근 상자 (shahed·발사관이 쓴다)
+  test_detail_kit.py      그 순수 기하 테스트
   shahed-136/             델타익 무인기 (기본형 · EO/IR형)
   banshee/                쌍발 제트 표적기 Banshee Jet 80+ — 원본 조립 모델을 같은 규약으로 구움
   launcher/               캐니스터 발사관

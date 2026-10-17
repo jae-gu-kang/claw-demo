@@ -39647,1842 +39647,6 @@ function runwayUniformValues(s) {
     aim: aimingPoint(s.length)
   };
 }
-const CLOUD_UNIFORM_DECL = (
-  /* glsl */
-  `
-#ifndef CLOUD_UNIFORM_DECL_G
-#define CLOUD_UNIFORM_DECL_G
-uniform float uCloudCover;    // 덮임 0~1 (표시 값)
-uniform float uCloudBase;     // 밑면 고도 [m]
-uniform float uCloudThick;    // 두께 [m]
-uniform vec2 uCloudWind;      // 흐름 [m/s] (렌더 x·z)
-uniform float uCloudTime;     // [s] — 시뮬 시각
-uniform float uCloudGain;     // 표시 보정 — 이 렌더러의 절대 밝기는 물리 단위가 아니다
-#endif
-`
-);
-const CLOUD_COVER_GLSL = (
-  /* glsl */
-  `
-/** 한 지점(수평 xz)의 구름 덮임 0~1 — 밀도의 2D 뼈대. */
-float cloudCoverAt(vec2 xz) {
-  vec2 q = (xz + uCloudWind * uCloudTime) * (1.0 / 2600.0);
-  float shape = fbm2(q, 4) * 0.5 + 0.5;
-  float th = 1.0 - uCloudCover;
-  return smoothstep(th - 0.08, th + 0.24, shape);
-}
-
-/** 월드 한 점에 드리우는 구름 그림자 0(그늘)~1(맑음).
- *
- *  점에서 태양 쪽으로 올라가 구름 밑면과 만나는 자리의 덮임을 읽는다 — 적분이 아니라
- *  한 표본이라 반그림자는 덮임 경사가 대신한다(표시용 근사). 해가 지평에 붙으면 직사광
- *  자체가 없으므로 그림자도 같이 걷는다. */
-float cloudShadowAt(vec3 p, vec3 sunDir) {
-  if (uCloudCover <= 0.001) return 1.0;
-  float up = max(sunDir.y, 0.08);
-  vec2 hit = p.xz + sunDir.xz * ((uCloudBase - p.y) / up);
-  float cover = cloudCoverAt(hit);
-  // 그늘 바닥 0.45 — 실제 구름 그늘도 하늘빛 산란광은 받는다. 우리 근사는 알베도를
-  // 통째로 줄여 주변광까지 어두워지므로, 바닥을 두어 그 과장을 되돌린다.
-  float strength = smoothstep(0.05, 0.35, sunDir.y);
-  return 1.0 - (1.0 - 0.45) * cover * strength;
-}
-
-/** 직사광이 구름을 지나 오는 비율 0.15~1 — **직사광 항에만** 곱한다(지면 재질).
- *
- *  cloudShadowAt과 같은 덮임 표본인데 바닥이 다르다. 그쪽은 알베도에 곱하던 때의 근사라
- *  주변광까지 어두워지는 과장을 바닥 0.45로 되돌렸다. 지면은 이제 조명이 끝난 뒤 직사광만
- *  깎으므로 그늘의 하늘빛은 그대로 산다 — 실제 구름 그늘처럼 직사광이 대부분 막힌다. */
-float cloudSunTransmit(vec3 p, vec3 sunDir) {
-  if (uCloudCover <= 0.001) return 1.0;
-  float up = max(sunDir.y, 0.08);
-  vec2 hit = p.xz + sunDir.xz * ((uCloudBase - p.y) / up);
-  float strength = smoothstep(0.05, 0.35, sunDir.y);
-  return 1.0 - 0.85 * cloudCoverAt(hit) * strength;
-}
-`
-);
-function cloudGlsl(steps, lightSteps) {
-  const S2 = Math.max(1, Math.round(steps));
-  const LS = Math.max(1, Math.round(lightSteps));
-  return (
-    /* glsl */
-    `
-const float CLOUD_EARTH_R = 6371000.0;
-const float CLOUD_SIGMA = 0.02;     // 소산계수 [1/m] — 두께 600 m에서 광학두께 12
-
-/** 카메라(고도 camY)에서 방향 d로 반지름 R+alt 구 껍질까지의 두 교점 거리. 없으면 false. */
-bool cloudShell(float camY, vec3 d, float alt, out float tNear, out float tFar) {
-  float oy = CLOUD_EARTH_R + camY;
-  float b = oy * d.y;
-  float r = CLOUD_EARTH_R + alt;
-  float c = oy * oy - r * r;
-  float disc = b * b - c;
-  if (disc < 0.0) { tNear = -1.0; tFar = -1.0; return false; }
-  float s = sqrt(disc);
-  tNear = -b - s;
-  tFar = -b + s;
-  return true;
-}
-
-/** 슬래브 안의 적분 구간 [t0, t1]. 구간이 없으면 false. */
-bool cloudSpan(float camY, vec3 d, out float t0, out float t1) {
-  float base = uCloudBase;
-  float top = uCloudBase + uCloudThick;
-  float bN, bF, tN, tF;
-  bool hitB = cloudShell(camY, d, base, bN, bF);
-  bool hitT = cloudShell(camY, d, top, tN, tF);
-  if (camY < base) {
-    // 아래에서 본다 — 지평 아래로 향하는 시선은 지면이 가린다(평평한 지형이 50 km까지).
-    if (d.y < -0.005 || !hitT) return false;
-    t0 = max(bF, 0.0);
-    t1 = tF;
-  } else if (camY > top) {
-    // 위에서 본다 — 내려가는 시선만 만난다.
-    if (d.y >= 0.0 || !hitT || tN <= 0.0) return false;
-    t0 = tN;
-    t1 = (hitB && bN > 0.0) ? bN : tF;
-  } else {
-    // 슬래브 안 — 여기서 시작한다.
-    t0 = 0.0;
-    t1 = (d.y >= 0.0) ? tF : ((hitB && bN > 0.0) ? bN : tF);
-  }
-  return t1 > t0;
-}
-
-/** 한 점의 구름 밀도 0~1. 2D 뼈대는 cloudCoverAt — 지면 그림자와 같은 함수다. */
-float cloudDensity(vec3 p, vec2 drift) {
-  float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
-  float cov = cloudCoverAt(p.xz);
-  if (cov <= 0.001) return 0.0;
-  // 수직 프로파일 — 밑은 평평하게 잘리고, 윗면은 덮임이 짙을수록 높이 솟는다.
-  float top = 0.30 + 0.70 * cov;
-  float prof = smoothstep(0.0, 0.10, hN) * (1.0 - smoothstep(top - 0.30, top, hN));
-  float dens = cov * prof;
-  if (dens <= 0.002) return 0.0;
-  // 가장자리 침식 — 얇은 곳부터 깎여 뭉게구름의 너덜너덜한 윤곽이 된다.
-  float det = fbm2((p.xz + drift * 1.4) * (1.0 / 420.0) + hN * 0.9, 3) * 0.5 + 0.5;
-  return clamp(dens - (1.0 - det) * 0.55 * (1.0 - dens), 0.0, 1.0);
-}
-
-/** 구름 위상 — 두 갈래 HG. 4π를 곱해 무차원(방향 평균 1)으로 둔다. */
-float cloudPhase(float c) {
-  return 4.0 * 3.14159265 * (0.65 * phaseMie(c, 0.55) + 0.35 * phaseMie(c, -0.35));
-}
-
-/** 시선 하나의 구름 — rgb는 복사휘도(대기 감쇠·in-scatter 포함), a는 투과율.
- *  camPos는 월드, dir·sunDir은 정규화. 구름이 없으면 (0,0,0,1). */
-vec4 cloudLayer(vec3 camPos, vec3 dir, vec3 sunDir, float sunIntensity, float haze) {
-  float t0, t1;
-  if (uCloudCover <= 0.001 || !cloudSpan(camPos.y, dir, t0, t1)) return vec4(0.0, 0.0, 0.0, 1.0);
-  // 스치는 시선은 슬래브를 아주 길게 지난다. 너무 길면 표본이 성겨져 **구름이 층층이
-  // 썬 것처럼** 보이고(14배·10걸음에서 실측), 지평선이 통째로 덮인다. 두께의 8배에서
-  // 자른다 — 그 너머는 어차피 대기가 지운다.
-  t1 = min(t1, t0 + uCloudThick * 8.0);
-
-  vec2 drift = uCloudWind * uCloudTime;
-  vec3 sunCol = sunThroughAtmosphere(sunDir, sunIntensity, haze);
-  // 환경광 — 천정 하늘빛. 밑면은 그늘이라 절반, 윗면은 그대로.
-  vec3 skyUp = skyRadiance(vec3(0.0, 1.0, 0.0), sunDir, sunIntensity, haze);
-  float ph = cloudPhase(dot(dir, sunDir));
-
-  float T = 1.0;
-  vec3 L = vec3(0.0);
-  float dt = (t1 - t0) / float(${S2});
-  float lstep = uCloudThick * 0.7 / float(${LS});
-  // 시작점을 픽셀마다 한 걸음 안에서 흔든다 — 남는 줄무늬가 결이 고운 잡음이 된다.
-  // 시선 방향의 해시라 화면 좌표가 없어도 픽셀마다 다르다.
-  float jitter = hash2(dir.xy * 4096.0 + dir.zz * 1731.0).x * 0.5 + 0.5;
-  for (int i = 0; i < ${S2}; i++) {
-    float t = t0 + (float(i) + jitter) * dt;
-    vec3 p = camPos + dir * t;
-    float rho = cloudDensity(p, drift);
-    if (rho <= 0.002) continue;
-    // 태양 쪽 광학두께 — 몇 걸음이면 밑면이 어둡고 윗면이 밝은 것은 나온다.
-    float od = 0.0;
-    for (int j = 0; j < ${LS}; j++) {
-      od += cloudDensity(p + sunDir * ((float(j) + 0.6) * lstep), drift) * lstep;
-    }
-    float Ts = exp(-CLOUD_SIGMA * od);
-    float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
-    vec3 direct = sunCol * Ts * ph;
-    vec3 amb = skyUp * mix(0.45, 1.0, hN);
-    // 이 구간이 산란해 내는 몫(알베도 ≈ 1). 앞에서 뒤로 쌓는다.
-    float a = 1.0 - exp(-CLOUD_SIGMA * rho * dt);
-    L += (direct + amb) * a * T;
-    T *= 1.0 - a;
-    if (T < 0.02) break;
-  }
-  if (T > 0.999) return vec4(0.0, 0.0, 0.0, 1.0);
-
-  // 대기 — 구름까지의 거리로. 지형·하늘·바다와 같은 함수다.
-  vec3 Ta, Sa;
-  atmosphere(dir, sunDir, sunIntensity, haze, t0, Ta, Sa);
-  return vec4(L * uCloudGain * Ta + Sa * (1.0 - T), T);
-}
-`
-  );
-}
-const GROUND_UNIFORM_DECL = (
-  /* glsl */
-  `
-uniform sampler2D uHeightFine;     // 촘촘한 티어 표고 [m] (반정밀도, 선형 필터)
-uniform sampler2D uHeightCoarse;   // 넓은 티어 표고 [m]
-uniform vec4 uHFine;               // (e0, n0, 간격 [m], 0) — 칸 (0, 0)의 NED와 격자 간격
-uniform vec2 uHFineSize;           // (열, 행)
-uniform vec4 uHCoarse;
-uniform vec2 uHCoarseSize;
-uniform float uHeightOn;           // 0이면 표고 텍스처가 없다 — 자체 그림자를 건너뛴다
-uniform float uTerrainTop;         // 팩 최고 표고 [m] — 그림자 광선이 이보다 높아지면 멈춘다
-`
-);
-const GROUND_VARYING_DECL = (
-  /* glsl */
-  `
-varying vec3 vGroundWorld;
-varying vec3 vGroundNormal;
-varying vec2 vGroundShade;   // (하늘 열림, 볼록도) — core/terrainshade.ts가 정점에 굽는다
-`
-);
-const GROUND_VERT_DECL = (
-  /* glsl */
-  `
-attribute vec2 aTerrain;
-${GROUND_VARYING_DECL}
-`
-);
-const GROUND_VERT_BODY = (
-  /* glsl */
-  `
-  vGroundWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
-  vGroundNormal = normalize(mat3(modelMatrix) * objectNormal);
-  vGroundShade = aTerrain;
-`
-);
-const GROUND_GLSL = (
-  /* glsl */
-  `
-// ---- 지표 피복 알베도 (선형) — sRGB 감각으로 고른 색을 2.2제곱해 적었다. 표시 값이다.
-const vec3 GR_CONIFER   = vec3(0.028, 0.045, 0.020);
-const vec3 GR_BROAD     = vec3(0.055, 0.085, 0.030);
-const vec3 GR_AUTUMN    = vec3(0.120, 0.095, 0.028);
-const vec3 GR_UNDER     = vec3(0.014, 0.018, 0.011);   // 수관 사이 그늘진 바닥
-const vec3 GR_RICE_RIPE = vec3(0.300, 0.235, 0.075);   // 익은 벼 (10월)
-const vec3 GR_RICE_GRN  = vec3(0.135, 0.165, 0.050);   // 덜 익은 벼 (황록)
-const vec3 GR_STUBBLE   = vec3(0.215, 0.165, 0.090);   // 벤 논
-const vec3 GR_SOIL      = vec3(0.150, 0.115, 0.075);   // 갈아엎은 밭
-const vec3 GR_VEG       = vec3(0.095, 0.130, 0.050);   // 채소밭
-const vec3 GR_VINYL     = vec3(0.360, 0.375, 0.385);   // 비닐하우스 (먼지 낀 흰 비닐)
-const vec3 GR_DIKE      = vec3(0.110, 0.125, 0.055);   // 논둑 풀
-const vec3 GR_ROAD      = vec3(0.280, 0.270, 0.250);   // 농로 콘크리트
-const vec3 GR_ROCK      = vec3(0.190, 0.175, 0.150);
-const vec3 GR_MUD_WET   = vec3(0.055, 0.052, 0.046);
-const vec3 GR_MUD_DRY   = vec3(0.150, 0.132, 0.105);
-const vec3 GR_YARD      = vec3(0.180, 0.170, 0.155);   // 마당·골목
-const vec3 GR_GRASS     = vec3(0.125, 0.145, 0.060);   // 깎은 풀 (비행장, 10월의 누런 풀빛)
-const vec3 GR_ASPHALT   = vec3(0.070, 0.070, 0.075);
-const vec3 GR_GRASS_DRY = vec3(0.165, 0.150, 0.070);   // 깎은 풀밭의 마른 자리
-const vec3 GR_PAINT     = vec3(0.600, 0.600, 0.580);   // 활주로 흰 도색 (닳은 흰색)
-const vec3 GR_PAINT_YEL = vec3(0.520, 0.360, 0.040);   // 과주로 노란 갈매기표
-
-float grHash(vec2 c, float k) { return hash31(vec3(c, k)); }
-
-/** 들 — 블록(보로노이 약 420 m)마다 방향과 필지 크기가 다르고, 블록 안은 회전 격자다.
- *  parcel 필지 난수, dike 가장 가까운 둑까지 [m], road 블록 경계(농로)까지 [m], block 블록 난수,
- *  q 필지 좌표 [m](x가 필지의 긴 변 — 이랑·콤바인 자국은 이 축과 나란하다).
- *
- *  **회전각은 블록마다 상수다.** 처음에 지역 방향을 픽셀마다 노이즈로 뽑았더니, 각이 조금만
- *  변해도 원점에서 수 km 떨어진 좌표가 크게 돌아가 필지가 동심원 호처럼 휘었다(화면 실측). 그래서
- *  지역 방향도 블록 중심에서 한 번 읽고, 회전은 블록 중심 기준 좌표로 한다(정밀도도 산다). */
-void grFields(vec2 p, out float parcel, out float dike, out float road, out float block, out vec2 q) {
-  const float BLOCK = 420.0;
-  vec2 bp = p / BLOCK;
-  vec2 bi = floor(bp);
-  float d1 = 1.0e9;
-  float d2 = 1.0e9;
-  vec2 best = bi;
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
-      vec2 c = bi + vec2(float(i), float(j));
-      vec2 o = c + 0.15 + 0.7 * vec2(grHash(c, 1.0), grHash(c, 2.0));
-      float d = length(bp - o);
-      if (d < d1) { d2 = d1; d1 = d; best = c; }
-      else if (d < d2) { d2 = d; }
-    }
-  }
-  vec2 center = (best + 0.5) * BLOCK;
-  float ang = 3.0 * vnoise3(vec3(center * (1.0 / 2600.0), 9.1)) + (grHash(best, 4.0) - 0.5) * 0.9;
-  vec2 dir = vec2(cos(ang), sin(ang));
-  vec2 lp = p - center;
-  q = vec2(dot(lp, dir), dot(lp, vec2(-dir.y, dir.x)));
-  vec2 cell = mix(vec2(60.0, 24.0), vec2(115.0, 46.0), vec2(grHash(best, 5.0), grHash(best, 6.0)));
-  vec2 g = q / cell;
-  vec2 fi = floor(g);
-  vec2 fr = g - fi;
-  vec2 edge = min(fr, 1.0 - fr) * cell;
-  parcel = grHash(fi + best * 31.0, 7.0);
-  dike = min(edge.x, edge.y);
-  road = (d2 - d1) * BLOCK * 0.5;
-  block = grHash(best, 3.0);
-}
-
-/** 수관 — 7 m 격자에 한 그루씩, 반지름 2.3~3.9 m 포물면 돔(꼭대기 0.7 R). 겹치면 높은 쪽.
- *  돌려주는 것: x 덮임(0 빈틈 ~ 1 꼭대기), y 높이 [m], zw 높이의 기울기(세계 xz). */
-vec4 grCrowns(vec2 p) {
-  const float CELL = 7.0;
-  vec2 gi = floor(p / CELL);
-  vec4 res = vec4(0.0);
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
-      vec2 c = gi + vec2(float(i), float(j));
-      vec2 center = (c + 0.2 + 0.6 * vec2(grHash(c, 11.0), grHash(c, 12.0))) * CELL;
-      float R = 2.3 + 1.6 * grHash(c, 13.0);
-      vec2 d = p - center;
-      float u = 1.0 - dot(d, d) / (R * R);
-      float h = u * R * 0.7;
-      if (u > 0.0 && h > res.y) { res = vec4(sqrt(u), h, d * (-1.4 / R)); }
-    }
-  }
-  return res;
-}
-
-/** 마을 — 15 m 집터에 집 한 채(62%), 지붕은 회색·청회·주황·녹색·흰색 중 하나.
- *  돌려주는 것: rgb 지붕색, a 지붕 덮임(0이면 마당). */
-vec4 grVillage(vec2 p) {
-  const float LOT = 15.0;
-  vec2 g = p / LOT;
-  vec2 gi = floor(g);
-  vec2 off = abs(g - gi - 0.5);
-  if (grHash(gi, 21.0) > 0.62) return vec4(GR_YARD, 0.0);
-  vec2 hs = 0.22 + 0.16 * vec2(grHash(gi, 22.0), grHash(gi, 23.0));
-  float roofIn = step(off.x, hs.x) * step(off.y, hs.y);
-  float k = grHash(gi, 24.0);
-  vec3 roof = k < 0.30 ? vec3(0.20, 0.21, 0.22)
-            : k < 0.55 ? vec3(0.070, 0.110, 0.170)
-            : k < 0.75 ? vec3(0.320, 0.100, 0.050)
-            : k < 0.88 ? vec3(0.070, 0.150, 0.100)
-            : vec3(0.55, 0.55, 0.53);
-  return vec4(roof, roofIn);
-}
-
-/** 지표 피복 한 점 — 알베도·거칠기·미세 기울기(법선 흔들기)·젖음·미세 차폐.
- *  p 세계 위치, n 기하 법선(세계, 정규화), shade (열림, 볼록도), shoreD 바다까지 [m] (모르면 큰 수),
- *  pw 픽셀 발자국 [m], dxy 세계 xz의 화면 도함수 (dFdx의 x·z, dFdy의 x·z) — 활주로 도색이 축마다 발자국을 잰다. */
-void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
-             out vec3 albedo, out float rough, out vec2 grad, out float wet, out float occ) {
-  vec2 xz = p.xz;
-  float elev = p.y;
-  float ny = clamp(n.y, 0.05, 1.0);
-  float slope = sqrt(max(1.0 - ny * ny, 0.0)) / ny;   // 경사 tan
-  float convex = shade.y;
-
-  // 피복 경계를 흔드는 큰 무늬 — 멀어지면 평균(0.44)으로 접는다
-  // 다 접힌 거리에서는 노이즈를 아예 부르지 않는다 — 와이드샷 픽셀 대부분이 거기다
-  float nA = pw < 200.0 ? mix(fbm3(vec3(xz * (1.0 / 310.0), 1.7)), 0.44, smoothstep(80.0, 200.0, pw)) : 0.44;
-  float nB = pw < 60.0 ? mix(fbm3(vec3(xz * (1.0 / 95.0), 5.3)), 0.44, smoothstep(25.0, 60.0, pw)) : 0.44;
-
-  // ---- 가중치
-  // 갯벌 — 물가의 좁은 띠만. 처음엔 900 m까지 칠했는데, 간척지 안 작은 물웅덩이 둘레마다 둥근
-  // 검보라 무리가 생겼다(화면 실측). 해안 턱은 이제 해수면 판정이 바다로 흡수한다(core/seamask.ts).
-  float wWet = (1.0 - smoothstep(0.8, 2.5, elev)) * (1.0 - smoothstep(40.0, 150.0, shoreD + (nB - 0.44) * 160.0))
-             * (1.0 - smoothstep(0.07, 0.16, slope));
-  float flatness = 1.0 - smoothstep(0.05, 0.12, slope + (nB - 0.44) * 0.06);
-  float lowland = 1.0 - smoothstep(60.0, 150.0, elev - convex * 45.0 + (nA - 0.44) * 70.0);
-  // 들 가운데 작은 숲(마을숲·묘역) — 경계를 날카롭게. 반쯤 섞으면 들 위에 검은 수관이 흩뿌린 점으로 떴다
-  float woodlot = smoothstep(0.69, 0.715, nB);
-  float wField = flatness * lowland * (1.0 - woodlot) * (1.0 - wWet);
-  // 마을 — 산자락(경사가 막 오르는 띠)의 드문 군집. 처음 문턱(0.60)으로는 산마다 회색 띠가
-  // 둘려 시멘트 고리처럼 읽혔다(화면 실측) — 군집을 드물게, 띠를 좁게 했다.
-  float foot = smoothstep(0.035, 0.065, slope) * (1.0 - smoothstep(0.11, 0.17, slope)) * lowland;
-  float wVillage = foot * (1.0 - wWet)
-                 * smoothstep(0.70, 0.76, vnoise3(vec3(xz * (1.0 / 260.0), 13.0)));
-  float wRock = clamp(smoothstep(0.85, 1.4, slope + (nB - 0.44) * 0.7)
-                + smoothstep(0.55, 0.95, convex) * smoothstep(0.4, 0.8, slope) * 0.5, 0.0, 1.0);
-  float wShore = (1.0 - smoothstep(20.0, 55.0, shoreD)) * smoothstep(0.05, 0.14, slope);
-
-  // ---- 숲
-  float broad = smoothstep(0.30, 0.62, nA);
-  vec3 forest = mix(GR_CONIFER, GR_BROAD, broad);
-  if (elev > 120.0 && broad > 0.0) {
-    float autumn = smoothstep(0.55, 0.74, vnoise3(vec3(xz * (1.0 / 520.0), 2.2)))
-                 * smoothstep(120.0, 360.0, elev) * broad;
-    forest = mix(forest, GR_AUTUMN, autumn * 0.45);
-  }
-  float mott = pw < 30.0 ? mix(fbm3(vec3(xz * (1.0 / 34.0), 4.4)), 0.44, smoothstep(10.0, 30.0, pw)) : 0.44;
-  forest *= (0.72 + 0.62 * mott) * (1.0 + convex * 0.10);
-  vec2 forestGrad = vec2(0.0);
-  float forestOcc = 1.0;
-  float crownFade = 1.0 - smoothstep(1.2, 3.5, pw);
-  if (crownFade > 0.001) {
-    vec4 cr = grCrowns(xz);
-    vec3 crown = cr.x > 0.0 ? forest * (0.85 + 0.40 * cr.x) : GR_UNDER;
-    forest = mix(forest, crown, crownFade);
-    forestGrad = cr.zw * crownFade;
-    forestOcc = mix(1.0, 0.55 + 0.45 * cr.x, crownFade);
-  }
-  vec3 col = forest;
-  float rgh = 0.92;
-
-  // ---- 들
-  if (wField > 0.001) {
-    // 먼 들의 평균 — 지역마다(약 700 m) 익은 쪽·푸른 쪽으로 기운다. 필지 색의 면적 평균과 맞춘다
-    float region = vnoise3(vec3(xz * (1.0 / 700.0), 6.6));
-    vec3 field = mix(vec3(0.150, 0.160, 0.065), vec3(0.225, 0.190, 0.080), region)
-               * (0.9 + 0.22 * nB);
-    float frough = 0.88;
-    float parcelVis = 1.0 - smoothstep(10.0, 28.0, pw);
-    if (parcelVis > 0.001) {
-      float parcel, dikeD, roadD, block;
-      vec2 q;
-      grFields(xz, parcel, dikeD, roadD, block, q);
-      // 블록마다 주 작물이 있고 필지 셋 중 둘이 그것을 따른다 — 이웃끼리 닮고 블록끼리 갈린다.
-      // 필지마다 따로 뽑았더니 색이 센 바둑판이 됐다(화면 실측).
-      float dom = grHash(vec2(block * 977.0, 3.0), 31.0);
-      float u = parcel < 0.66 ? dom : fract(parcel * 7.13);
-      int kind = u < 0.40 ? 0 : u < 0.62 ? 1 : u < 0.82 ? 2 : u < 0.90 ? 3 : 4;
-      vec3 crop = kind == 0 ? GR_RICE_RIPE : kind == 1 ? GR_RICE_GRN : kind == 2 ? GR_STUBBLE
-                : kind == 3 ? GR_SOIL : GR_VEG;
-      crop *= 0.94 + 0.12 * fract(parcel * 53.0);
-      // 필지 안 결 — 벼 포기는 고운 얼룩, 벤 논은 콤바인 자국(2.2 m), 밭은 고랑(0.9 m), 채소는 이랑(1.2 m).
-      // 줄은 필지의 긴 변(q.x)과 나란하다. 줄 간격이 픽셀 몇 개로 줄면 접는다.
-      float spacing = kind == 2 ? 2.2 : kind == 3 ? 0.9 : 1.2;
-      float rowAmp = (kind == 2 ? 0.10 : kind == 3 ? 0.16 : kind == 4 ? 0.20 : 0.0)
-                   * (1.0 - smoothstep(spacing * 0.25, spacing * 0.6, pw));
-      float rows = sin(q.y * (6.2832 / spacing));
-      float grain = mix(fbm3(vec3(xz * (1.0 / 2.5), 7.7)) - 0.44, 0.0, smoothstep(0.8, 2.5, pw));
-      crop *= 1.0 + rowAmp * rows + 0.18 * grain;
-      if (kind == 4) crop = mix(crop, GR_SOIL, 0.35 * rowAmp * 5.0 * max(-rows, 0.0));
-      // 비닐하우스 — 몇 블록에 몰려, 폭 7 m 동이 1.5 m 틈을 두고 나란히(흩뿌리면 흰 점박이가 된다)
-      bool vinyl = block > 0.86 && parcel > 0.62;
-      if (vinyl) {
-        float house = (1.0 - smoothstep(0.78, 0.80, fract(q.y / 8.5)));
-        float ridge = 1.0 - abs(fract(q.y / 8.5) / 0.79 - 0.5) * 2.0;     // 동의 등마루 쪽이 밝다
-        vec3 hv = GR_VINYL * (0.8 + 0.3 * ridge);
-        float vis = 1.0 - smoothstep(1.5, 5.0, pw);
-        crop = mix(mix(GR_VINYL * 0.85, GR_SOIL, 0.18), mix(GR_SOIL, hv, house), vis);
-      }
-      // 둑 — 폭 0.9 m, 풀빛으로 연하게. 픽셀보다 가늘어지면 면적 비율로 섞는다
-      float dike = 1.0 - smoothstep(0.45 - pw * 0.5, 0.45 + pw * 0.5, dikeD);
-      crop = mix(crop, mix(crop, GR_DIKE, 0.6), mix(dike, 0.03, smoothstep(1.0, 3.0, pw)));
-      // 농로 — 블록 경계, 블록 셋 중 둘
-      float road = (1.0 - smoothstep(2.2 - pw * 0.5, 2.2 + pw * 0.5, roadD)) * step(0.33, block);
-      crop = mix(crop, GR_ROAD, mix(road, 0.03, smoothstep(3.0, 8.0, pw)));
-      field = mix(field, crop, parcelVis);
-      frough = mix(frough, vinyl ? 0.45 : 0.88, parcelVis);
-    }
-    col = mix(col, field, wField);
-    rgh = mix(rgh, frough, wField);
-  }
-
-  // ---- 마을
-  if (wVillage > 0.001) {
-    vec3 village = mix(GR_YARD, GR_BROAD, 0.45);   // 먼 마을의 평균 — 지붕·마당·집 사이 나무
-    float vilVis = 1.0 - smoothstep(1.5, 5.0, pw);
-    if (vilVis > 0.001) {
-      vec4 hv = grVillage(xz);
-      village = mix(village, mix(GR_YARD, hv.rgb, hv.a), vilVis);
-    }
-    col = mix(col, village, wVillage);
-    rgh = mix(rgh, 0.8, wVillage);
-  }
-
-  // ---- 암반·해안 바위
-  if (wRock > 0.001) {
-    vec3 rock = GR_ROCK * (0.7 + 0.6 * mix(fbm3(vec3(xz * (1.0 / 9.0), elev * 0.2)), 0.44,
-                                            smoothstep(3.0, 9.0, pw)));
-    col = mix(col, rock, wRock);
-    rgh = mix(rgh, 0.85, wRock);
-  }
-  col = mix(col, GR_ROCK * 0.55, wShore);
-  rgh = mix(rgh, 0.6, wShore);
-
-  // ---- 갯벌 — 갯골은 가는 물길, 낮을수록 젖었다
-  float wetness = 0.0;
-  if (wWet > 0.001) {
-    float chn = abs(fbm2(xz * (1.0 / 170.0), 3));
-    float channel = (1.0 - smoothstep(0.015, 0.045 + pw * 0.001, chn)) * (1.0 - smoothstep(20.0, 60.0, pw));
-    vec3 mud = mix(GR_MUD_WET, GR_MUD_DRY,
-                   clamp(smoothstep(0.8, 4.0, elev) * 0.8 + (nB - 0.44) * 0.6, 0.0, 1.0));
-    mud = mix(mud, GR_MUD_WET * 0.55, channel);
-    wetness = clamp(0.6 + channel * 0.4 - smoothstep(1.0, 4.0, elev) * 0.5, 0.0, 1.0);
-    col = mix(col, mud, wWet);
-    rgh = mix(rgh, mix(0.85, 0.22, wetness), wWet);
-  }
-
-  // ---- 미세 기복 — 30 m 격자가 못 싣는 굴곡(42 m·12 m 두 옥타브). 들·갯벌·마을은 평평하다
-  vec2 micro = vec2(0.0);
-  float mf1 = 1.0 - smoothstep(8.0, 20.0, pw);
-  if (mf1 > 0.001) micro += gnoise2(xz * (1.0 / 42.0)).yz * (3.0 / 42.0) * mf1;
-  float mf2 = 1.0 - smoothstep(2.5, 6.0, pw);
-  if (mf2 > 0.001) micro += gnoise2(xz * (1.0 / 12.0) + 5.0).yz * (0.9 / 12.0) * mf2;
-
-  // ---- 비행장 — 착륙대 풀밭, 포장면·과주로, 도색. 자리와 덮임은 shaders/runway.ts(게임 지형과 한 벌)이고, 여기는
-  // 실사의 결이다 — 깎은 풀 결·마른 자리, 타이어 자국, 아스팔트 결, 닳은 도색. 활주로는 결과의 것, 폭은 시험장
-  // 제원(core/runway.ts): 폭을 모르면 uRunwayOn이 0이고 아무것도 칠하지 않는다(포장면을 지어내지 않는다).
-  float field0 = 0.0;
-  if (uRunwayOn > 0.5) {
-    vec4 ax = grRunwayAxes(p, dxy);
-    vec4 af = grAirfield(ax);   // 층마다 몫 — 안쪽 층은 바깥 층의 몫만 바꾼다(shaders/runway.ts grAirfield)
-    field0 = af.x;
-    if (field0 > 0.001) {
-      float along = ax.x;
-      float across = ax.y;
-      float pa = ax.z;
-      float pc = ax.w;
-      float L = uRunway.z;
-      vec2 ne = vec2(-p.z, p.x);   // 렌더 x = e, z = -n
-      // 깎은 풀 — 깎는 기계가 오간 결(활주로와 나란히 5 m씩 번갈아 밝고 어둡다)과 마른 자리 얼룩
-      float mow = (smoothstep(-0.25, 0.25, sin(across * (6.2832 / 10.0))) - 0.5) * 0.10
-                * (1.0 - smoothstep(1.5, 4.0, pc));
-      float dry = pw < 20.0 ? mix(fbm3(vec3(ne * (1.0 / 23.0), 9.1)), 0.44, smoothstep(8.0, 20.0, pw)) : 0.44;
-      vec3 grass = mix(GR_GRASS, GR_GRASS_DRY, smoothstep(0.40, 0.62, dry + (nB - 0.44) * 0.5))
-                 * (0.94 + 0.12 * nB + mow);
-      col = mix(col, grass, field0);
-      rgh = mix(rgh, 0.9, field0);
-      // 포장면 — 활주로와 양 끝 과주로. 접지대(시단에서 100~450 m)에 타이어 자국, 과주로는 덜 다녀 바랬다
-      float paved = af.y;
-      float onRunway = grBand(along - 0.5 * L, 0.5 * L, pa);
-      float tz = smoothstep(80.0, 160.0, along) * (1.0 - smoothstep(380.0, 480.0, along))
-               + smoothstep(80.0, 160.0, L - along) * (1.0 - smoothstep(380.0, 480.0, L - along));
-      float rubber = tz * (1.0 - smoothstep(4.0, 9.0, abs(across)));
-      float tex = mix(fbm3(vec3(ne * 0.5, 2.0)) - 0.44, 0.0, smoothstep(1.0, 4.0, pw));
-      vec3 asph = GR_ASPHALT * (1.0 + 0.25 * tex) * (1.0 - 0.35 * rubber) * mix(1.12, 1.0, onRunway);
-      col += paved * (asph - grass);
-      rgh += paved * (0.75 - 0.9);
-      if (paved > 0.001) {
-        // 도색 — 흰색(af.z)·노란 갈매기표(af.w)는 포장면의 몫만 바꾼다. 포장면 덮임을 한 번 더 곱하면 가장자리에 붙은
-        // 측면 표지가 두 번 걸러져 멀리서 어둡고 깜빡였다(v1.94 리뷰 실측)
-        float wear = 0.80 + 0.20 * clamp(1.0 + 2.0 * tex, 0.0, 1.0);   // 닳은 도색 — 아스팔트 결이 비친다
-        col += af.z * (GR_PAINT * wear * (1.0 - 0.45 * rubber) - asph) + af.w * (GR_PAINT_YEL * wear - asph);
-        rgh += (af.z + af.w) * (0.62 - 0.75);
-      }
-    }
-  }
-
-  float bare = (1.0 - wField) * (1.0 - wWet) * (1.0 - wVillage) * (1.0 - field0);
-  float fShare = bare * (1.0 - wRock) * (1.0 - wShore);
-  albedo = col;
-  rough = rgh;
-  grad = forestGrad * fShare + micro * bare;
-  wet = wWet * wetness * (1.0 - field0);
-  occ = mix(1.0, forestOcc, fShare);
-}
-
-/** 촘촘한 티어가 덮으면 그것, 아니면 넓은 티어, 둘 다 밖이면 해수면. */
-float grTerrainH(vec2 xz) {
-  vec2 en = vec2(xz.x, -xz.y);   // 렌더 x = e, z = -n (scene/axes.ts)
-  vec2 uv = ((en - uHFine.xy) / uHFine.z + 0.5) / uHFineSize;
-  if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) return textureLod(uHeightFine, uv, 0.0).r;
-  uv = ((en - uHCoarse.xy) / uHCoarse.z + 0.5) / uHCoarseSize;
-  if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) return textureLod(uHeightCoarse, uv, 0.0).r;
-  return 0.0;
-}
-
-/** 지형 자체 그림자 0(그늘) ~ 1(햇빛) — 머리말 「지형 자체 그림자」. p는 표면에서 조금 띄운 점.
- *  pw(픽셀 발자국)가 크면 — 먼 땅이면 — 걸음을 성기게 한다: 30걸음·1.22배 대신 16걸음·1.42배로
- *  같은 약 5.8 km를 덮는다. 먼 산그늘은 넓어서 성긴 걸음으로도 잡히고, 화면 픽셀 대부분이 거기다. */
-float grTerrainShadow(vec3 p, vec3 L, float pw) {
-  if (uHeightOn < 0.5) return 1.0;
-  if (L.y <= 0.0) return 0.0;
-  bool far = pw > 8.0;
-  int steps = far ? 16 : 30;
-  float grow = far ? 1.42 : 1.22;
-  float res = 1.0;
-  float t = 18.0;
-  for (int i = 0; i < 30; i++) {
-    if (i >= steps) break;
-    vec3 q = p + L * t;
-    if (q.y > uTerrainTop + 2.0) break;
-    res = min(res, (q.y - grTerrainH(q.xz)) / (t * 0.03));
-    if (res < -0.5) break;
-    t *= grow;
-  }
-  res = clamp(res, 0.0, 1.0);
-  return res * res * (3.0 - 2.0 * res);
-}
-`
-);
-const GROUND_FRAG_BODY = (
-  /* glsl */
-  `
-  vec2 grGrad = vec2(0.0);
-  float grWet = 0.0;
-  float grOcc = 1.0;
-  // 픽셀 발자국 [m] — 화면 도함수는 **분기와 discard 앞에서 한 번만** 잰다. 갈라진 분기 안이나
-  // discard 뒤의 도함수는 GLSL에서 정의되지 않는다(조명 단계의 그림자 걸음 수도 이 값을 쓴다).
-  // dFdx·dFdy 한 쌍에서 등방 발자국(= fwidth의 길이)을 셈하고, 활주로 도색은 축마다 따로 잰다(grCover의 dxy)
-  vec3 grDx = dFdx(vGroundWorld);
-  vec3 grDy = dFdy(vGroundWorld);
-  float grPw = max(length(abs(grDx) + abs(grDy)), 1.0e-3);
-  {
-    vec3 gp = vGroundWorld;
-    vec3 gn = normalize(vGroundNormal);
-    float pw = grPw;
-    vec2 coast = coastAt(gp.xz);
-    // 물가의 해수면 높이 조각은 버린다 — 해면이 그 자리를 그린다. 지형은 바다 칸을 **칸 단위로**
-    // 빼므로(scene/terrain.ts) 남은 해안 칸이 30 m 계단으로 바다에 걸쳐 해안선이 톱니가 됐다.
-    // 해수면에 붙은 조각을 버리면 해안선이 삼각형 안의 0.35 m 등고선이 된다. 바다에서 60 m 넘게
-    // 떨어진 0 m 땅(활주로가 있는 간척지)은 거리장이 막는다.
-    if (gp.y < 0.35 && uHasCoast > 0.5 && coast.y > 0.5 && coast.x > -60.0) discard;
-    // 뭍에서 바다까지 [m] — 거리장은 바다 쪽이 양수다. 모르면(자료 없음) 바다와 먼 것으로 친다
-    float shoreD = (uHasCoast > 0.5 && coast.y > 0.5) ? max(-coast.x, 0.0) : 1.0e4;
-    vec3 albedo;
-    float rough;
-    grCover(gp, gn, vGroundShade, shoreD, pw, vec4(grDx.xz, grDy.xz), albedo, rough, grGrad, grWet, grOcc);
-    diffuseColor.rgb = albedo;
-    roughnessFactor = rough;
-  }
-`
-);
-const GROUND_NORMAL_BODY = (
-  /* glsl */
-  `
-  vec3 grNw = normalize(normalize(vGroundNormal) + vec3(-grGrad.x, 0.0, -grGrad.y));
-  normal = normalize((viewMatrix * vec4(grNw, 0.0)).xyz);
-`
-);
-const GROUND_LIGHT_BODY = (
-  /* glsl */
-  `
-  {
-    vec3 L = uSunDirWorld;
-    vec3 gn = normalize(vGroundNormal);
-    float sunVis = cloudSunTransmit(vGroundWorld, L);
-    // 해를 등진 면은 어차피 직사광이 0이다 — 그림자 광선을 쏠 이유가 없다
-    if (dot(gn, L) > -0.02) sunVis *= grTerrainShadow(vGroundWorld + gn * 2.0, L, grPw);
-    reflectedLight.directDiffuse *= sunVis;
-    reflectedLight.directSpecular *= sunVis;
-    reflectedLight.indirectDiffuse *= vGroundShade.x * grOcc;
-    // 젖은 갯벌은 하늘을 비춘다 — 물의 프레넬(F0 0.02), 하늘과 같은 산란 함수
-    if (grWet > 0.001) {
-      vec3 V = normalize(cameraPosition - vGroundWorld);
-      float NoV = clamp(dot(grNw, V), 0.0, 1.0);
-      float F = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);
-      vec3 R = reflect(-V, grNw);
-      R.y = max(R.y, 0.01);
-      reflectedLight.indirectSpecular += grWet * F * skyRadiance(R, uSunDirWorld, uSunIntensity, uHaze);
-    }
-  }
-`
-);
-const CELL = { LAND: 0, SEA: 1, MISSING: 2 };
-function seaLevelRaw(tier) {
-  if (!(tier.scale > 0)) return null;
-  const v2 = (0 - tier.offset) / tier.scale;
-  const r2 = Math.round(v2);
-  return Math.abs(v2 - r2) < 1e-9 && r2 >= 0 && r2 <= 65535 ? r2 : null;
-}
-function atSeaLevel(tier, i, seaRaw) {
-  const v2 = tier.raw[i];
-  if (v2 === tier.nodata) return false;
-  if (seaRaw !== null) return v2 === seaRaw;
-  return Math.abs(tier.offset + v2 * tier.scale) < tier.scale * 0.5;
-}
-function cellToNed(tier, r2, c) {
-  return [tier.n0 + r2 * tier.step, tier.e0 + c * tier.step];
-}
-function nedToCell(tier, n2, e) {
-  const r2 = Math.round((n2 - tier.n0) / tier.step);
-  const c = Math.round((e - tier.e0) / tier.step);
-  if (r2 < 0 || c < 0 || r2 >= tier.rows || c >= tier.cols) return null;
-  return [r2, c];
-}
-function floodTier(tier, extraSeeds) {
-  const { rows, cols } = tier;
-  const n2 = rows * cols;
-  const cells = new Uint8Array(n2);
-  const seaRaw = seaLevelRaw(tier);
-  let missingCells = 0;
-  const isSeaLevel = new Uint8Array(n2);
-  for (let i = 0; i < n2; i++) {
-    if (tier.raw[i] === tier.nodata) {
-      cells[i] = CELL.MISSING;
-      missingCells++;
-    } else if (atSeaLevel(tier, i, seaRaw)) {
-      isSeaLevel[i] = 1;
-    }
-  }
-  const queue = new Int32Array(n2);
-  let head = 0;
-  let tail = 0;
-  const push = (i) => {
-    if (isSeaLevel[i] === 1 && cells[i] !== CELL.SEA) {
-      cells[i] = CELL.SEA;
-      queue[tail++] = i;
-    }
-  };
-  for (let c = 0; c < cols; c++) {
-    push(c);
-    push((rows - 1) * cols + c);
-  }
-  for (let r2 = 0; r2 < rows; r2++) {
-    push(r2 * cols);
-    push(r2 * cols + cols - 1);
-  }
-  if (extraSeeds) {
-    for (let r2 = 0; r2 < rows; r2++) {
-      for (let c = 0; c < cols; c++) {
-        if (extraSeeds(r2, c)) push(r2 * cols + c);
-      }
-    }
-  }
-  while (head < tail) {
-    const i = queue[head++];
-    const r2 = i / cols | 0;
-    const c = i - r2 * cols;
-    if (r2 > 0) push(i - cols);
-    if (r2 + 1 < rows) push(i + cols);
-    if (c > 0) push(i - 1);
-    if (c + 1 < cols) push(i + 1);
-  }
-  let seaCells = 0;
-  let landAtSeaLevel = 0;
-  for (let i = 0; i < n2; i++) {
-    if (cells[i] === CELL.SEA) seaCells++;
-    else if (isSeaLevel[i] === 1) landAtSeaLevel++;
-  }
-  return { name: tier.name, rows, cols, cells, seaCells, landAtSeaLevel, missingCells, shelfCells: 0 };
-}
-const SHELF = {
-  /** 이 표고 [m] 이하의 뭍만 본다 */
-  maxElevM: 2.5,
-  /** 둘레 창의 반경 [칸] — 7×7 */
-  radiusCells: 3,
-  /** 창 안 바다 비율이 이 이상이면 바다 */
-  seaFrac: 0.35,
-  /** 규칙 1을 되풀이하는 횟수 — 넓은 저지대를 이만큼만 깎는다 */
-  passes: 2,
-  /** 규칙 2의 덩어리 넓이 상한 [m²] */
-  maxBlobM2: 36e4
-};
-function absorbShelves(tier, flooded) {
-  const { rows, cols } = tier;
-  const n2 = rows * cols;
-  const cells = flooded.cells.slice();
-  const elev = new Float32Array(n2);
-  for (let i = 0; i < n2; i++) {
-    const v2 = tier.raw[i];
-    elev[i] = v2 === tier.nodata ? Number.NaN : tier.offset + v2 * tier.scale;
-  }
-  const low = (i) => cells[i] === CELL.LAND && elev[i] <= SHELF.maxElevM;
-  const w2 = cols + 1;
-  const sat = new Int32Array((rows + 1) * w2);
-  const R2 = SHELF.radiusCells;
-  for (let pass = 0; pass < SHELF.passes; pass++) {
-    for (let r2 = 0; r2 < rows; r2++) {
-      let rowSum = 0;
-      for (let c = 0; c < cols; c++) {
-        rowSum += cells[r2 * cols + c] === CELL.SEA ? 1 : 0;
-        sat[(r2 + 1) * w2 + c + 1] = sat[r2 * w2 + c + 1] + rowSum;
-      }
-    }
-    const flip = [];
-    for (let r2 = 0; r2 < rows; r2++) {
-      const r0 = Math.max(r2 - R2, 0);
-      const r1 = Math.min(r2 + R2, rows - 1) + 1;
-      for (let c = 0; c < cols; c++) {
-        const i = r2 * cols + c;
-        if (!low(i)) continue;
-        const c0 = Math.max(c - R2, 0);
-        const c1 = Math.min(c + R2, cols - 1) + 1;
-        const sea = sat[r1 * w2 + c1] - sat[r0 * w2 + c1] - sat[r1 * w2 + c0] + sat[r0 * w2 + c0];
-        if (sea >= SHELF.seaFrac * (r1 - r0) * (c1 - c0)) flip.push(i);
-      }
-    }
-    if (flip.length === 0) break;
-    for (const i of flip) cells[i] = CELL.SEA;
-  }
-  const maxCells = SHELF.maxBlobM2 / (tier.step * tier.step);
-  const seen = new Uint8Array(n2);
-  const stack = new Int32Array(n2);
-  const members = [];
-  for (let s = 0; s < n2; s++) {
-    if (seen[s] || cells[s] !== CELL.LAND) continue;
-    let top = 0;
-    let peak = -Infinity;
-    members.length = 0;
-    stack[top++] = s;
-    seen[s] = 1;
-    while (top > 0) {
-      const i = stack[--top];
-      members.push(i);
-      if (elev[i] > peak) peak = elev[i];
-      const r2 = i / cols | 0;
-      const c = i - r2 * cols;
-      for (const j of [
-        r2 > 0 ? i - cols : -1,
-        r2 + 1 < rows ? i + cols : -1,
-        c > 0 ? i - 1 : -1,
-        c + 1 < cols ? i + 1 : -1
-      ]) {
-        if (j >= 0 && !seen[j] && cells[j] === CELL.LAND) {
-          seen[j] = 1;
-          stack[top++] = j;
-        }
-      }
-    }
-    if (members.length < maxCells && peak <= SHELF.maxElevM) {
-      for (const i of members) cells[i] = CELL.SEA;
-    }
-  }
-  let seaCells = 0;
-  let landAtSeaLevel = 0;
-  const seaRaw = seaLevelRaw(tier);
-  for (let i = 0; i < n2; i++) {
-    if (cells[i] === CELL.SEA) seaCells++;
-    else if (cells[i] === CELL.LAND && atSeaLevel(tier, i, seaRaw)) landAtSeaLevel++;
-  }
-  return {
-    ...flooded,
-    cells,
-    seaCells,
-    landAtSeaLevel,
-    shelfCells: seaCells - flooded.seaCells
-  };
-}
-function extentOf(t2) {
-  return Math.max(t2.rows * t2.step, t2.cols * t2.step);
-}
-function buildSeaMasks(tiers) {
-  const order = [...tiers].sort((a, b) => extentOf(b) - extentOf(a));
-  const out = /* @__PURE__ */ new Map();
-  const done = [];
-  for (const tier of order) {
-    const seeds = done.length === 0 ? null : (r2, c) => {
-      const [n2, e] = cellToNed(tier, r2, c);
-      for (const prev of done) {
-        const idx = nedToCell(prev.tier, n2, e);
-        if (idx && prev.mask.cells[idx[0] * prev.mask.cols + idx[1]] === CELL.SEA) return true;
-      }
-      return false;
-    };
-    const mask = floodTier(tier, seeds);
-    out.set(tier.name, mask);
-    done.push({ tier, mask });
-  }
-  for (const { tier, mask } of done) out.set(tier.name, absorbShelves(tier, mask));
-  return out;
-}
-function edt1d(f2, n2, d, v2, z2) {
-  let k2 = 0;
-  v2[0] = 0;
-  z2[0] = -Infinity;
-  z2[1] = Infinity;
-  for (let q2 = 1; q2 < n2; q2++) {
-    let s = (f2[q2] + q2 * q2 - (f2[v2[k2]] + v2[k2] * v2[k2])) / (2 * q2 - 2 * v2[k2]);
-    while (s <= z2[k2]) {
-      k2--;
-      s = (f2[q2] + q2 * q2 - (f2[v2[k2]] + v2[k2] * v2[k2])) / (2 * q2 - 2 * v2[k2]);
-    }
-    k2++;
-    v2[k2] = q2;
-    z2[k2] = s;
-    z2[k2 + 1] = Infinity;
-  }
-  k2 = 0;
-  for (let q2 = 0; q2 < n2; q2++) {
-    while (z2[k2 + 1] < q2) k2++;
-    const dq = q2 - v2[k2];
-    d[q2] = dq * dq + f2[v2[k2]];
-  }
-}
-function squaredDistanceTransform(seed, w2, h) {
-  const INF = 1e20;
-  const out = new Float64Array(w2 * h);
-  for (let i = 0; i < w2 * h; i++) out[i] = seed[i] === 0 ? 0 : INF;
-  const n2 = Math.max(w2, h);
-  const f2 = new Float64Array(n2);
-  const d = new Float64Array(n2);
-  const v2 = new Int32Array(n2);
-  const z2 = new Float64Array(n2 + 1);
-  for (let x2 = 0; x2 < w2; x2++) {
-    for (let y2 = 0; y2 < h; y2++) f2[y2] = out[y2 * w2 + x2];
-    edt1d(f2, h, d, v2, z2);
-    for (let y2 = 0; y2 < h; y2++) out[y2 * w2 + x2] = d[y2];
-  }
-  for (let y2 = 0; y2 < h; y2++) {
-    const row = y2 * w2;
-    for (let x2 = 0; x2 < w2; x2++) f2[x2] = out[row + x2];
-    edt1d(f2, w2, d, v2, z2);
-    for (let x2 = 0; x2 < w2; x2++) out[row + x2] = d[x2];
-  }
-  return out;
-}
-function domainOf(tiers) {
-  let n0 = Infinity;
-  let e0 = Infinity;
-  let n1 = -Infinity;
-  let e1 = -Infinity;
-  for (const { tier } of tiers) {
-    n0 = Math.min(n0, tier.n0);
-    e0 = Math.min(e0, tier.e0);
-    n1 = Math.max(n1, tier.n0 + (tier.rows - 1) * tier.step);
-    e1 = Math.max(e1, tier.e0 + (tier.cols - 1) * tier.step);
-  }
-  return { n0, e0, nSpan: Math.max(n1 - n0, 1), eSpan: Math.max(e1 - e0, 1) };
-}
-function buildCoastField(tiers, size = 1536) {
-  const fine = [...tiers].sort((a, b) => a.tier.step - b.tier.step);
-  const dom = domainOf(fine.length > 0 ? fine : tiers);
-  const w2 = size;
-  const h = size;
-  const seaSeed = new Float64Array(w2 * h);
-  const landSeed = new Float64Array(w2 * h);
-  const known = new Uint8Array(w2 * h);
-  const isSea = new Uint8Array(w2 * h);
-  for (let r2 = 0; r2 < h; r2++) {
-    const n2 = dom.n0 + dom.nSpan * r2 / (h - 1);
-    for (let c = 0; c < w2; c++) {
-      const e = dom.e0 + dom.eSpan * c / (w2 - 1);
-      const i = r2 * w2 + c;
-      let cell = null;
-      for (const { tier, mask } of fine) {
-        const idx = nedToCell(tier, n2, e);
-        if (idx) {
-          cell = mask.cells[idx[0] * mask.cols + idx[1]];
-          break;
-        }
-      }
-      if (cell === null) cell = CELL.SEA;
-      if (cell === CELL.MISSING) {
-        seaSeed[i] = 1;
-        landSeed[i] = 1;
-        continue;
-      }
-      known[i] = 1;
-      if (cell === CELL.SEA) {
-        isSea[i] = 1;
-        seaSeed[i] = 0;
-        landSeed[i] = 1;
-      } else {
-        seaSeed[i] = 1;
-        landSeed[i] = 0;
-      }
-    }
-  }
-  const toSea = squaredDistanceTransform(seaSeed, w2, h);
-  const toLand = squaredDistanceTransform(landSeed, w2, h);
-  const mpc = Math.min(dom.eSpan / (w2 - 1), dom.nSpan / (h - 1));
-  const dist = new Float32Array(w2 * h);
-  for (let i = 0; i < w2 * h; i++) {
-    dist[i] = isSea[i] === 1 ? Math.sqrt(toLand[i]) * mpc : -Math.sqrt(toSea[i]) * mpc;
-  }
-  return { size, n0: dom.n0, e0: dom.e0, nSpan: dom.nSpan, eSpan: dom.eSpan, dist, known, metersPerCell: mpc };
-}
-const COAST_RANGE_M = 1500;
-function encodeCoastField(f2) {
-  const out = new Uint8Array(f2.size * f2.size * 2);
-  for (let i = 0; i < f2.size * f2.size; i++) {
-    const t2 = Math.max(-1, Math.min(1, f2.dist[i] / COAST_RANGE_M)) * 0.5 + 0.5;
-    out[2 * i] = Math.round(t2 * 255);
-    out[2 * i + 1] = f2.known[i] === 1 ? 255 : 0;
-  }
-  return out;
-}
-const G = 9.80665;
-function significantWaveHeight(windSpeed) {
-  const u2 = Math.max(windSpeed, 0);
-  return 0.21 * u2 * u2 / G;
-}
-function peakWavelength(windSpeed) {
-  const u2 = Math.max(windSpeed, 0.5);
-  const omegaP = 0.877 * G / u2;
-  return 2 * Math.PI * G / (omegaP * omegaP);
-}
-function coxMunkSlopeVariance(windSpeed) {
-  return 3e-3 + 512e-5 * Math.max(windSpeed, 0);
-}
-const COMPONENTS = [
-  { lengthRatio: 1.9, weight: 1, spreadDeg: 0 },
-  // 너울 — 바람 방향
-  { lengthRatio: 1.15, weight: 0.78, spreadDeg: -22 },
-  { lengthRatio: 0.62, weight: 0.52, spreadDeg: 31 },
-  { lengthRatio: 0.31, weight: 0.34, spreadDeg: -47 },
-  { lengthRatio: 0.15, weight: 0.21, spreadDeg: 58 }
-  // 중파 — 방향이 가장 벌어진다
-];
-const WAVE_COUNT = COMPONENTS.length;
-function gerstnerSet(windSpeed, windDirRad, steepness = 0.65) {
-  const hs = significantWaveHeight(windSpeed);
-  const lp = peakWavelength(windSpeed);
-  const wsum = COMPONENTS.reduce((s2, c) => s2 + c.weight * c.weight, 0);
-  const scale = wsum > 0 ? Math.sqrt(hs * hs / 8 / wsum) : 0;
-  const s = Math.min(Math.max(steepness, 0), 1);
-  return COMPONENTS.map((c) => {
-    const length = Math.max(lp * c.lengthRatio, 0.5);
-    const k2 = 2 * Math.PI / length;
-    const amplitude = scale * c.weight;
-    const a = windDirRad + c.spreadDeg * Math.PI / 180;
-    const q2 = amplitude > 0 ? s / (k2 * amplitude * WAVE_COUNT) : 0;
-    return {
-      dir: [Math.cos(a), Math.sin(a)],
-      length,
-      amplitude,
-      k: k2,
-      omega: Math.sqrt(G * k2),
-      q: q2
-    };
-  });
-}
-const WAVE_NOTES = {
-  displayOnly: "해상 상태(풍속·파고·파향)는 표시 값이며 시뮬 입력이 아닙니다 — 비행동역학은 이 값을 모릅니다.",
-  model: "파면은 게르스트너 성분 5개(심해 분산관계 ω²=gk)이고 파고는 피어슨-모스코비츠 H_s=0.21U²/g입니다. 윤슬 폭은 콕스-먼크 경사분산 σ²=0.003+0.00512U에서 나옵니다."
-};
-const COAST_GLSL = (
-  /* glsl */
-  `
-#ifndef COAST_GLSL_G
-#define COAST_GLSL_G
-uniform sampler2D uCoast;
-uniform vec2 uCoastMin;      // (e0, n0) [m]
-uniform vec2 uCoastInvSpan;  // 1/(eSpan, nSpan)
-// 0이면 거리장이 없다. 그때 해면은 scene/ocean.ts가 통째로 숨기므로 이 갈래는 보수적
-// 기본값일 뿐이다 — 지형을 모르면 해안선도 모른다.
-uniform float uHasCoast;
-
-/** 월드 (x, z) → (해안거리 [m], known). 도메인 밖은 열린 바다. */
-vec2 coastAt(vec2 worldXZ) {
-  if (uHasCoast < 0.5) return vec2(${COAST_RANGE_M}.0, 1.0);
-  // 렌더 좌표 x = e, z = −n (scene/axes.ts — 주석 안에서 백틱은 리터럴을 끊는다).
-  vec2 uv = (vec2(worldXZ.x, -worldXZ.y) - uCoastMin) * uCoastInvSpan;
-  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
-    return vec2(${COAST_RANGE_M}.0, 1.0);
-  }
-  vec2 t = textureLod(uCoast, uv, 0.0).rg;
-  return vec2((t.r * 2.0 - 1.0) * ${COAST_RANGE_M}.0, t.g);
-}
-#endif
-`
-);
-const OCEAN_VERT = (
-  /* glsl */
-  `
-${COAST_GLSL}
-uniform mat4 uGridInvViewProj;
-uniform vec3 uCamPos;
-uniform float uMaxDist;
-uniform float uTime;
-uniform vec2 uGridAngle;       // (세로 한 줄, 가로 한 칸)이 덮는 화각 [rad]
-uniform float uShoreFade;      // 이 거리 안쪽에서 파고가 0으로 잦아든다 [m]
-uniform vec4 uWave[${WAVE_COUNT}];    // dir.x, dir.z, 진폭 A, 파수 k
-uniform vec2 uWaveQ[${WAVE_COUNT}];   // 가파름 Q, 각주파수 ω
-
-varying vec3 vWorld;
-varying vec3 vNormal;
-varying float vDist;
-varying vec2 vCoast;   // (해안거리 [m], known)
-
-/** NDC 한 점 → 해수면 위의 밑점. */
-vec3 seaBase(vec2 ndc) {
-  vec4 a = uGridInvViewProj * vec4(ndc, -1.0, 1.0);
-  vec4 b = uGridInvViewProj * vec4(ndc,  1.0, 1.0);
-  vec3 dir = normalize(b.xyz / b.w - a.xyz / a.w);
-  // 카메라가 해수면 아래면 광선이 뒤로 간다 — 물 밑은 이 모델의 밖이라 위로 붙여 둔다.
-  float h = max(uCamPos.y, 0.05);
-  // 아래로 향하는 광선만 평면과 만난다. 지평선 위쪽은 최대 거리로 밀어 고리로 뭉친다
-  // (그 줄의 삼각형은 넓이가 0이 된다 — 버려지는 것이 맞다).
-  float t = (dir.y < -1.0e-4) ? min(h / -dir.y, uMaxDist) : uMaxDist;
-  vec3 p = uCamPos + dir * t;
-  return vec3(p.x, 0.0, p.z);
-}
-
-void main() {
-  vec3 base = seaBase(position.xy);
-  vDist = length(base.xz - uCamPos.xz);
-
-  // **격자가 못 푸는 파장은 그리지 않는다 (나이퀴스트).**
-  //
-  // 투영 격자의 칸은 **길쭉하다.** 시선 방향으로는 높이 h에서 거리 d일 때 d²·θ_v/h로
-  // 벌어지고(스치는 각일수록 급격히), 가로로는 d·θ_h로 훨씬 촘촘하다. 처음에 시선
-  // 방향만 보고 판정했더니 30 m 상공·300 m 앞에서 칸이 16 m로 잡혀 **20 m 파까지 접혔고
-  // 바다가 유리판이 됐다.** 방향이 정해지지 않은 2차원 파의 표본 밀도를 정하는 것은
-  // 면적이므로 두 간격의 기하평균을 쓴다.
-  //
-  // 고정 거리로 죽이는 것과 갈리는 곳은 고도다: 궤도 시점(20 km 상공)에서는 200 m 파도
-  // 못 풀고, 해면 근처에서는 10 m 파가 살아야 한다. 이 식은 그 둘을 함께 맞춘다.
-  float camH = max(uCamPos.y, 1.0);
-  float along = vDist * vDist * uGridAngle.x / camH;
-  float across = vDist * uGridAngle.y;
-  float cell = max(sqrt(along * across), 0.05);
-
-  // **해안에서 파고를 재운다.** 표고가 정확히 0 m인 땅이 16.5 km² 있어서(간척지·저지대),
-  // 재우지 않으면 파마루가 지형을 뚫고 올라온다 — 실측으로 본 그것이다.
-  // 얕은 곳에서 파도가 부서져 잦아드는 것과 같은 방향이라 물리적으로도 어긋나지 않는다.
-  vCoast = coastAt(base.xz);
-  float shore = smoothstep(0.0, uShoreFade, vCoast.x);
-
-  vec3 disp = vec3(0.0);
-  vec3 n = vec3(0.0, 1.0, 0.0);
-  for (int i = 0; i < ${WAVE_COUNT}; i++) {
-    vec2 d = uWave[i].xy;
-    float k = uWave[i].w;
-    // 파장이 두 칸보다 짧아지면(k·cell > π) 진폭을 0으로 접는다. 잃은 기울기는
-    // 프래그먼트의 거칠기가 통계로 받는다 — 그래서 멀리서도 윤슬이 회색으로 안 죽는다.
-    float nyq = 1.0 - smoothstep(1.4, 3.14159265, k * cell);
-    float A = uWave[i].z * nyq * shore;
-    float Q = uWaveQ[i].x;
-    float w = uWaveQ[i].y;
-    float ph = k * dot(d, base.xz) - w * uTime;
-    float S = sin(ph);
-    float C = cos(ph);
-    disp.x += Q * A * d.x * C;
-    disp.z += Q * A * d.y * C;
-    disp.y += A * S;
-    // GPU Gems 1 §1의 해석 법선 — 변위와 같은 항에서 나오므로 따로 어긋나지 않는다.
-    n.x -= d.x * k * A * C;
-    n.z -= d.y * k * A * C;
-    n.y -= Q * k * A * S;
-  }
-
-  vWorld = base + disp;
-  vNormal = normalize(n);
-  // **투영만 패스별 행렬로 한다.** 위치는 uGridInvViewProj에서 나왔으므로 두 패스가 같다.
-  gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.0);
-}
-`
-);
-const OCEAN_FRAG = (
-  /* glsl */
-  `
-uniform vec3 uCamPos;
-uniform float uRoughness;      // √(콕스-먼크 σ²)
-uniform float uWaveHeight;     // 유의파고 [m] — 마루를 밝히는 데 쓴다
-uniform vec3 uDeepColor;
-uniform vec3 uScatterColor;
-uniform vec3 uShallowColor;
-uniform float uGlitterGain;
-uniform float uFoamAmount;
-uniform float uSpecAA;         // 법선 분산 → 거칠기 변환 계수
-uniform float uRipple;         // 잔물결 기울기 세기 — 풍속에서 나온다
-uniform vec2 uWindDir;         // 바람이 가는 방향 (렌더 x·z 평면 단위벡터)
-uniform float uTime;
-
-/** 잔물결의 기울기 (∂y/∂x, ∂y/∂z).
- *
- *  격자가 못 푸는 4 m 아래 파다. 정점을 못 움직이므로 **법선만** 흔든다.
- *
- *  **사인 합에서 노이즈로 바꿨다.** 처음에는 방향이 다른 사인 넷을 더했는데, 방향을
- *  아무리 흩고 위상을 휘어도 간섭이 규칙적인 짜임을 만들었다(실측 — 근거리 해면이
- *  모눈종이처럼 보였다). 사인 합은 주기적이므로 피할 수 없는 성질이다.
- *
- *  **옥타브마다 픽셀 발자국으로 접는다.** px는 이 픽셀이 덮는 세계 거리다. 파장이 그보다
- *  짧아지면 그리는 순간 에일리어싱이고, 거리로 한꺼번에 접으면 가까운 큰 잔물결까지
- *  같이 죽는다. 접은 몫의 기울기 분산은 lostVar로 내보내 **거칠기가 이어받는다** —
- *  에너지가 사라지지 않으므로 멀어져도 윤슬이 회색으로 죽지 않는다.
- *
- *  흐름은 바람 방향으로 밀어 준다. 심해 분산관계를 이 규모까지 끌고 가지는 않았다 —
- *  1 m 이하는 표면장력이 지배해 식이 달라지고, 화면에서 구별되지 않는다. 표시용이다. */
-vec2 rippleSlope(vec2 p, vec2 windDir, float t, float px, out float lostVar) {
-  vec2 g = vec2(0.0);
-  lostVar = 0.0;
-  float L = 4.3;
-  // 기울기 진폭. 네 옥타브를 합친 RMS 기울기가 0.1 안팎이 되도록 잡았다 — 풍속 9 m/s의
-  // 콕스-먼크 전체 경사 RMS가 0.22이므로 절반쯤을 기하로 들고 나머지는 거칠기가 받는다.
-  float amp = 0.16;
-  for (int i = 0; i < 4; i++) {
-    // 파장이 픽셀의 1.3배 아래로 내려가면 다 접힌다.
-    float lod = 1.0 - smoothstep(0.55, 1.3, px / L);
-    vec2 q = (p - windDir * (t * (0.9 + 0.55 * float(i)))) / L;
-    vec2 d = gnoise2(q).yz / L;
-    g += d * (amp * L * lod);
-    // 옥타브 하나의 기울기 분산 어림 — 접힌 몫만 거칠기로 넘긴다.
-    float dropped = amp * (1.0 - lod);
-    lostVar += 0.5 * dropped * dropped;
-    L *= 0.47;
-    amp *= 0.8;
-  }
-  return g;
-}
-
-varying vec3 vWorld;
-varying vec3 vNormal;
-varying float vDist;
-varying vec2 vCoast;
-
-/** GGX 법선분포 — α는 콕스-먼크 경사분산의 제곱근이다(베크만 경사분산 = α²). */
-float ggxD(float NoH, float a2) {
-  float d = NoH * NoH * (a2 - 1.0) + 1.0;
-  return a2 / (3.14159265 * d * d);
-}
-
-/** 스미스 높이상관 가시성항 — 분모의 4·NoL·NoV까지 품는다. */
-float ggxV(float NoV, float NoL, float a2) {
-  float gv = NoL * sqrt(NoV * NoV * (1.0 - a2) + a2);
-  float gl = NoV * sqrt(NoL * NoL * (1.0 - a2) + a2);
-  return 0.5 / max(gv + gl, 1.0e-5);
-}
-
-void main() {
-  // **뭍 위에는 해면이 없다.** 자료가 없는 칸도 마찬가지다 — 지형 구멍으로 바다가 비치면
-  // 그건 구멍이 아니라 호수로 읽힌다(core/coastfield.ts). 문턱을 뭍 쪽으로 120 m 밀어
-  // 두는 이유는 거리장이 39 m/칸이라 해안선을 이 격자로 그릴 수 없기 때문이다.
-  if (vCoast.y < 0.5 || vCoast.x < -120.0) discard;
-
-  vec3 toEye = uCamPos - vWorld;
-  float dist = length(toEye);
-  vec3 V = toEye / max(dist, 1.0e-4);
-  // **기하 스페큘러 안티에일리어싱 — 게르스트너 법선에만 건다.**
-  //
-  // 한 픽셀 안에서 법선이 많이 흔들리면, 옳은 답은 그 흔들림 위에서 **평균 낸** 반사다.
-  // 법선 하나로 계산하면 픽셀마다 튀어 지글거리고, 밉맵처럼 법선을 뭉개기만 하면 이번엔
-  // 윤슬이 회색 죽으로 죽는다. 그래서 분산을 **거칠기로 옮긴다**(Kaplanyan/Tokuyoshi 계열).
-  //
-  // **잔물결을 더하기 전에 잰다.** 섞어서 재면 잔물결의 분산까지 "에일리어싱"으로 읽혀
-  // 해면이 통째로 눕는다 — 그렇게 만들어 보니 바다가 무늬 없는 판이 됐다. 잔물결은 이미
-  // 픽셀 발자국으로 대역제한돼 있어서 여기서 다시 벌줄 이유가 없다.
-  vec3 Ng = normalize(vNormal);
-  vec3 dNx = dFdx(Ng);
-  vec3 dNy = dFdy(Ng);
-  float varN = dot(dNx, dNx) + dot(dNy, dNy);
-  // 하늘 반사도 같은 이유로 튄다. 법선을 그만큼 눕혀 반사 방향을 안정시킨다.
-  vec3 N = normalize(mix(Ng, vec3(0.0, 1.0, 0.0), clamp(varN * uSpecAA * 0.6, 0.0, 0.6)));
-
-  // 잔물결 — 격자 아래 4 m 파를 법선으로만 되돌린다.
-  // px는 이 픽셀이 덮는 세계 거리. 스치는 각에서 커지므로 수평선 쪽이 저절로 접힌다.
-  float px = max(length(fwidth(vWorld.xz)), 1.0e-4);
-  float lostVar = 0.0;
-  vec2 g = rippleSlope(vWorld.xz, uWindDir, uTime, px, lostVar) * uRipple;
-  N = normalize(N + vec3(-g.x, 0.0, -g.y));
-
-  // 접힌 잔물결의 분산 + 기하 법선의 흔들림. 둘 다 거칠기가 이어받는다.
-  float widen = clamp(varN * uSpecAA + lostVar * uRipple * uRipple * 2.0, 0.0, 0.35);
-  // 스치는 각에서 먼 파도의 뒷면이 보일 수 있다. 뒤집힌 법선을 그대로 쓰면 검은 얼룩이
-  // 되므로 시선 쪽으로 눕힌다 — 표시용 완화다.
-  float NoV = dot(N, V);
-  if (NoV < 0.02) {
-    N = normalize(N + V * (0.02 - NoV) * 1.05);
-    NoV = max(dot(N, V), 0.02);
-  }
-
-  // 프레넬 — 물 n = 1.33 → F0 = ((1.33−1)/(1.33+1))² = 0.020
-  float F = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);
-
-  // 하늘 반사. 지평 아래로 반사되면(파도 뒷면) 지평선 값을 읽는다 —
-  // 실제로 그 방향에 있는 것도 먼바다와 수평선 안개다.
-  vec3 R = reflect(-V, N);
-  R.y = max(R.y, 0.01);
-  vec3 sky = skyRadiance(R, uSunDirWorld, uSunIntensity, uHaze);
-  // 구름도 비친다 — 하늘과 같은 함수를 거친 적분으로 부른다(scene/ocean.ts가 걸음 수를 정한다).
-  // 반사 광선은 수면에서 출발한다.
-  vec4 cl = cloudLayer(vWorld, R, uSunDirWorld, uSunIntensity, uHaze);
-  sky = sky * cl.a + cl.rgb;
-
-  // 물속에서 되나오는 빛 — 마루에서 밝다(빛이 얇은 곳을 지난다).
-  float lift = clamp(vWorld.y / max(uWaveHeight, 0.05) * 0.5 + 0.5, 0.0, 1.0);
-  // 얕은 물은 바닥에서 되비쳐 밝고 푸르다. **수심 자료가 없으므로 해안 거리를 대신 쓴다** —
-  // 표시용 대리값이다(terrarium 타일에 수심이 없다: core/seamask.ts).
-  vec3 deep = mix(uShallowColor, uDeepColor, smoothstep(0.0, 900.0, vCoast.x));
-  vec3 body = deep + uScatterColor * lift * max(uSunDirWorld.y, 0.0);
-
-  vec3 color = mix(body, sky, F);
-
-  // 태양 정반사 — 윤슬. 폭은 uRoughness가 정하고, 그 값은 풍속에서 나온다.
-  // 구름 그림자는 직사광에만 건다 — 하늘 반사(sky)는 구름 낀 하늘 자체가 이미 어둡다.
-  vec3 sunCol = sunThroughAtmosphere(uSunDirWorld, uSunIntensity, uHaze)
-              * cloudShadowAt(vWorld, uSunDirWorld);
-  vec3 L = uSunDirWorld;
-  float NoL = max(dot(N, L), 0.0);
-  if (NoL > 0.0) {
-    vec3 H = normalize(L + V);
-    float NoH = max(dot(N, H), 0.0);
-    float a2 = clamp(uRoughness * uRoughness + widen, 1.0e-5, 1.0);
-    color += ggxD(NoH, a2) * ggxV(NoV, NoL, a2) * F * NoL * sunCol * uGlitterGain;
-  }
-
-  // 포말 — 마루와 해안선. 흰 거품은 거의 램버시안이라 하늘빛을 고루 받는다.
-  float crest = smoothstep(0.62, 0.95, lift) * uFoamAmount;
-  float surf = (1.0 - smoothstep(0.0, 90.0, vCoast.x)) * step(0.0, vCoast.x);
-  // 해안마다 똑같이 두르면 모든 섬이 흰 테두리를 쓴 그림이 된다(화면 실측) — 부서지는 파도는
-  // 곳에 따라 있다 없다 한다. 1 km 규모로 들쭉날쭉하게, 파고가 낮으면 잦아들게 한다(표시 값).
-  surf *= smoothstep(0.35, 0.75, fbm2(vWorld.xz * (1.0 / 900.0) + 3.7, 2) * 0.5 + 0.5)
-        * smoothstep(0.2, 1.6, uWaveHeight);
-  float foam = clamp(crest + surf * 0.8, 0.0, 1.0);
-  vec3 foamLit = (sunCol * max(uSunDirWorld.y, 0.0)
-                  + skyRadiance(vec3(0.0, 1.0, 0.0), uSunDirWorld, uSunIntensity, uHaze)) * 0.28;
-  color = mix(color, foamLit, foam);
-
-  // 대기 — 지형·하늘과 **같은 함수**다.
-  vec3 T, S;
-  atmosphere(-V, uSunDirWorld, uSunIntensity, uHaze, dist, T, S);
-  gl_FragColor = vec4(color * T + S, 1.0);
-}
-`
-);
-const RUNWAY_UNIFORM_DECL = (
-  /* glsl */
-  `
-uniform vec4 uRunway;              // (cos h, sin h, 길이 [m], 반폭 [m]) — NED 원점에서 heading 방향
-uniform float uRunwayOn;           // 0이면 포장면을 칠하지 않는다(폭을 모를 때 — core/runway.ts)
-uniform vec4 uRunwayArea;          // (과주로 [m], 착륙대 반폭 [m], 착륙대 끝 너머 [m], 0) — 착륙대는 펴진 바닥과 같은 구역
-uniform vec4 uRunwayNum;           // 활주로 번호 (시단 쪽 십·일, 맞은편 십·일) — 모르면 -1이고 번호를 칠하지 않는다
-uniform vec4 uRunwayDash;          // 중심선 (줄 길이, 주기 — 줄 하나면 0, 시단에서 시작, 0) [m] — 줄 길이 0이면 없다
-uniform vec4 uRunwayAim;           // 조준점 (시단에서 시작, 줄 길이, 폭, 두 줄 안쪽 간격) [m]
-`
-);
-const RUNWAY_GLSL = (
-  /* glsl */
-  `
-// ---- 활주로 도색 — 띠·숫자의 덮임을 픽셀 발자국 상자로 거른다(발자국은 축마다 — 아래). 가까이선 칼날, 멀어지면
-// 폭/발자국만큼 옅어진다(멀리서 지글거리지 않게). 좌표는 활주로 축 기준 [m]. 치수는 ICAO 부속서 14의 표준이다(실측
-// 아님). 길이로 정해지는 배치(중심선 줄·주기, 조준점)는 core/runway.ts가 셈해 유니폼으로 준다 — 시험이 닿는 곳이다.
-
-// 가운데 0, 반폭 h인 띠의 덮임 — 발자국 상자와 겹친 비율
-float grBand(float x, float h, float pw) {
-  float r = 0.5 * pw;
-  return clamp((min(x + r, h) - max(x - r, -h)) / pw, 0.0, 1.0);
-}
-
-// 주기 P로 되풀이되는 띠(반폭 h, 가운데가 P의 배수) — 발자국이 주기에 다가가면 띠 비율의 평균으로 접는다
-float grStripes(float x, float P, float h, float pw) {
-  float xr = x - P * floor(x / P + 0.5);
-  return mix(grBand(xr, h, pw), 2.0 * h / P, smoothstep(0.3 * P, P, pw));
-}
-
-// 7획 숫자의 획 비트 — a 위 1, b 오른 위 2, c 오른 아래 4, d 아래 8, e 왼 아래 16, f 왼 위 32, g 가운데 64.
-// 1은 가운데 막대 하나라 따로 그린다(활주로 숫자의 1은 오른쪽 두 획이 아니다)
-const int GR_SEG[10] = int[10](63, 0, 91, 79, 102, 109, 125, 7, 127, 111);
-
-// 아래 도색 함수는 발자국을 **축마다** 받는다 — pa 활주로 축 방향, pc 가로 방향(읽는 이의 u가 가로, v가 축이다).
-// 비스듬히 보면 축 방향 발자국만 늘어나므로, 등방 발자국으로 거르면 가는 가로 띠(중심선·측면 표지)가 앞쪽
-// 100~200 m에서 거의 사라졌다(v1.92 리뷰 실측). 조기 반환 경계는 발자국만큼 넓힌다 — 좁으면 멀리서 거른 띠의
-// 가장자리가 그 경계에서 잘려 점선처럼 기었다(같은 리뷰).
-
-// 숫자 하나 — 칸 가로 3 m(u, 읽는 이의 오른쪽이 +) · 세로 9 m(v, 읽는 위쪽이 +), 획 0.9 m. pu·pv는 u·v 방향 발자국
-float grDigit(float d, vec2 uv, float pu, float pv) {
-  if (d < 0.0 || uv.x < -1.0 - pu || uv.x > 4.0 + pu || uv.y < -1.0 - pv || uv.y > 10.0 + pv) return 0.0;
-  const float W = 3.0;
-  const float H = 9.0;
-  const float S = 0.9;
-  int k = clamp(int(d + 0.5), 0, 9);
-  if (k == 1) return grBand(uv.x - 0.5 * W, 0.5 * S, pu) * grBand(uv.y - 0.5 * H, 0.5 * H, pv);
-  int m = GR_SEG[k];
-  float bu = grBand(uv.x - 0.5 * W, 0.5 * W, pu);
-  float lu = grBand(uv.x - 0.5 * S, 0.5 * S, pu);
-  float ru = grBand(uv.x - (W - 0.5 * S), 0.5 * S, pu);
-  float top = grBand(uv.y - 0.75 * H, 0.25 * H, pv);
-  float bot = grBand(uv.y - 0.25 * H, 0.25 * H, pv);
-  float c = 0.0;
-  if ((m & 1) != 0) c = max(c, bu * grBand(uv.y - (H - 0.5 * S), 0.5 * S, pv));
-  if ((m & 2) != 0) c = max(c, ru * top);
-  if ((m & 4) != 0) c = max(c, ru * bot);
-  if ((m & 8) != 0) c = max(c, bu * grBand(uv.y - 0.5 * S, 0.5 * S, pv));
-  if ((m & 16) != 0) c = max(c, lu * bot);
-  if ((m & 32) != 0) c = max(c, lu * top);
-  if ((m & 64) != 0) c = max(c, bu * grBand(uv.y - 0.5 * H, 0.5 * S, pv));
-  return c;
-}
-
-// 활주로 번호 한 끝 — num (십, 일), s 시단에서 활주로 안쪽 [m], x 읽는 이의 오른쪽 [m]. 두 칸(각 3 m)이 가운데
-// 1.5 m를 두고 선다. 시단 줄무늬(6~36 m) 끝에서 12 m 띄운 48~57 m 자리다
-float grDesignation(vec2 num, float s, float x, float pa, float pc) {
-  if (num.x < 0.0 || s < 46.0 - pa || s > 59.0 + pa || abs(x) > 5.5 + pc) return 0.0;
-  float v = s - 48.0;
-  return max(grDigit(num.x, vec2(x + 3.75, v), pc, pa), grDigit(num.y, vec2(x - 0.75, v), pc, pa));
-}
-
-// 시단 줄무늬(피아노 건반) — 시단에서 6~36 m, 축 양쪽 같은 수의 줄. 줄과 칸이 같은 너비이고 가운데 칸만
-// 두 배다. 바깥 끝은 가장자리에서 3 m 안(최대 축에서 27 m) — 고흥 45 m 폭은 12줄, 너비 1.63 m
-float grPiano(float s, float x, float halfW, float pa, float pc) {
-  if (s < 4.0 - pa || s > 38.0 + pa) return 0.0;
-  float nSide = halfW <= 9.0 ? 2.0 : halfW <= 11.5 ? 3.0 : halfW <= 15.0 ? 4.0 : halfW <= 22.5 ? 6.0 : 8.0;
-  float outer = min(halfW - 3.0, 27.0);
-  float sw = outer / (2.0 * nSide);
-  float ax = abs(x);
-  // 줄 k는 축에서 (2k+1)·sw ~ (2k+2)·sw — 가운데 (2k+1.5)·sw, 주기 2·sw
-  float keys = grStripes(ax - 1.5 * sw, 2.0 * sw, 0.5 * sw, pc)
-             * grBand(ax - 0.5 * (sw + outer), 0.5 * (outer - sw), pc);
-  return keys * grBand(s - 21.0, 15.0, pa);
-}
-
-// 중심선 — 너비 0.9 m 줄을 양 끝에서 a0(69 m) 안쪽 구간에 고르게 깐다. 줄 길이·주기는 core/runway.ts
-// centerlineLayout이 셈한다(줄 + 칸 50~75 m, 줄 ≥ 칸·30 m, 양 끝이 온 줄 — 고흥은 30 m 줄 21개, 주기 51.85 m)
-float grCenterline(float along, float x, float L, float pa, float pc) {
-  float s = uRunwayDash.x;
-  float P = uRunwayDash.y;
-  float a0 = uRunwayDash.z;
-  if (s <= 0.0 || along < a0 - pa || along > L - a0 + pa || abs(x) > 1.0 + pc) return 0.0;
-  float dash = P > 0.0 ? grStripes(along - (a0 + 0.5 * s), P, 0.5 * s, pa) : 1.0;
-  return dash * grBand(x, 0.45, pc) * grBand(along - 0.5 * L, 0.5 * L - a0, pa);
-}
-
-// 과주로 갈매기표 — t 시단 밖으로 [m](0이 시단). 꼭짓점이 활주로 쪽을 가리키는 45도 줄, 30 m 간격, 너비 0.9 m.
-// k = t - |x|가 한 갈매기 위에서 일정하다 — 줄의 k 방향 반폭은 0.45의 루트2배, k의 발자국은 두 축 발자국의 합
-float grChevron(float t, float x, float over, float pa, float pc) {
-  if (t < -pa || t > over + pa) return 0.0;
-  return grStripes(t - abs(x) - 6.0, 30.0, 0.64, pa + pc) * grBand(t - 0.5 * over, 0.5 * over, pa);
-}
-
-// 활주로 축 좌표와 축마다 발자국 — p 세계 위치(렌더 x = e, z = -n), dxy 세계 xz의 화면 도함수(dFdx의 x·z, dFdy의
-// x·z). 돌려주는 값은 (along 시단에서 축 방향 [m], across 축의 오른쪽이 + [m], pa 축 방향 발자국 [m], pc 가로
-// 발자국 [m]) — 발자국은 세계 xz 도함수를 활주로 축으로 돌려 잰다
-vec4 grRunwayAxes(vec3 p, vec4 dxy) {
-  vec2 ne = vec2(-p.z, p.x);
-  float along = dot(ne, uRunway.xy);
-  float across = dot(ne, vec2(-uRunway.y, uRunway.x));
-  float pa = max(abs(dxy.x * uRunway.y - dxy.y * uRunway.x) + abs(dxy.z * uRunway.y - dxy.w * uRunway.x), 1.0e-3);
-  float pc = max(abs(dxy.x * uRunway.x + dxy.y * uRunway.y) + abs(dxy.z * uRunway.x + dxy.w * uRunway.y), 1.0e-3);
-  return vec4(along, across, pa, pc);
-}
-
-// 비행장 층마다 몫 (착륙대, 포장면, 흰 도색, 노란 도색) 각 0~1 — ax는 grRunwayAxes. 층은 안으로 겹친다(도색 ⊂ 포장면
-// ⊂ 착륙대)이므로 안쪽 몫은 바깥 몫을 넘지 않게 자르고, 칠할 때는 안쪽 층이 **바깥 층의 몫만** 바꾼다:
-//     c = mix(바탕, 풀, f.x);  c += f.y·(아스팔트 − 풀) + f.z·(흰색 − 아스팔트) + f.w·(노랑 − 아스팔트)
-// 덮임을 곱해 섞으면(mix(c, 흰색, 흰 덮임 × 포장면)) 가장자리에 붙은 측면 표지가 두 번 걸러져 멀리서 중심선보다 40 %
-// 어둡고 움직이면 깜빡였다(v1.94 리뷰 실측). 착륙대 경계는 발자국만큼만 부드럽다 — 예전엔 40~60 m에 걸쳐 섞어 들·
-// 비닐하우스 위에 흐린 띠가 얹혀 보였다(사용자 지적). 시단 사이는 흰색(측면 표지·시단 줄무늬·번호·중심선·조준점),
-// 과주로는 노란 갈매기표이고, 맞은편 끝은 남쪽으로 읽으므로 가로를 뒤집는다
-vec4 grAirfield(vec4 ax) {
-  float along = ax.x;
-  float across = ax.y;
-  float pa = ax.z;
-  float pc = ax.w;
-  float L = uRunway.z;
-  float halfW = uRunway.w;
-  float over = uRunwayArea.x;
-  float field = grBand(across, uRunwayArea.y, pc) * grBand(along - 0.5 * L, 0.5 * L + uRunwayArea.z, pa);
-  if (field <= 0.001) return vec4(0.0);
-  float paved = min(grBand(across, halfW, pc) * grBand(along - 0.5 * L, 0.5 * L + over, pa), field);
-  if (paved <= 0.001) return vec4(field, paved, 0.0, 0.0);
-  float onRunway = grBand(along - 0.5 * L, 0.5 * L, pa);
-  float sF = L - along;
-  float white = grBand(abs(across) - (halfW - 0.45), 0.45, pc) * onRunway;
-  white = max(white, max(grPiano(along, across, halfW, pa, pc), grPiano(sF, -across, halfW, pa, pc)));
-  white = max(white, max(grDesignation(uRunwayNum.xy, along, across, pa, pc),
-                         grDesignation(uRunwayNum.zw, sF, -across, pa, pc)));
-  white = max(white, grCenterline(along, across, L, pa, pc));
-  // 조준점 — (시작, 길이, 폭, 안쪽 간격)은 core/runway.ts aimingPoint가 활주로 길이의 열에서 고른다
-  vec4 aim = uRunwayAim;
-  float aimX = grBand(abs(across) - 0.5 * (aim.w + aim.z), 0.5 * aim.z, pc);
-  white = max(white, aimX * max(grBand(along - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa),
-                                grBand(sF - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa)));
-  float yel = max(grChevron(-along, across, over, pa, pc), grChevron(along - L, -across, over, pa, pc));
-  white = min(white, paved);
-  return vec4(field, paved, white, min(yel, paved - white));
-}
-`
-);
-const RUNWAY_GAME_VARYING_DECL = (
-  /* glsl */
-  `
-varying vec3 vRunwayWorld;
-`
-);
-const RUNWAY_GAME_VERT_BODY = (
-  /* glsl */
-  `
-  vRunwayWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
-`
-);
-const RUNWAY_GAME_GLSL = (
-  /* glsl */
-  `
-const vec3 GAME_RW_STRIP   = vec3(0.268, 0.516, 0.106);   // 깎은 풀밭 — sRGB (0.55, 0.74, 0.36), 들판 (0.44, 0.67, 0.31)보다 밝게
-const vec3 GAME_RW_ASPHALT = vec3(0.087, 0.093, 0.106);   // 아스팔트 — sRGB (0.33, 0.34, 0.36)
-const vec3 GAME_RW_PAINT   = vec3(0.681, 0.681, 0.646);   // 흰 도색 — sRGB (0.84, 0.84, 0.82)
-const vec3 GAME_RW_YELLOW  = vec3(0.914, 0.579, 0.036);   // 노란 갈매기표 — sRGB (0.96, 0.78, 0.22)
-`
-);
-const RUNWAY_GAME_FRAG_BODY = (
-  /* glsl */
-  `
-  {
-    vec3 rwDx = dFdx(vRunwayWorld);
-    vec3 rwDy = dFdy(vRunwayWorld);
-    if (uRunwayOn > 0.5) {
-      // 층마다 몫 — 안쪽 층은 바깥 층의 몫만 바꾼다(grAirfield 주석, 실사 지면과 같은 셈)
-      vec4 af = grAirfield(grRunwayAxes(vRunwayWorld, vec4(rwDx.xz, rwDy.xz)));
-      vec3 c = mix(diffuseColor.rgb, GAME_RW_STRIP, af.x);
-      c += af.y * (GAME_RW_ASPHALT - GAME_RW_STRIP);
-      diffuseColor.rgb = c + af.z * (GAME_RW_PAINT - GAME_RW_ASPHALT) + af.w * (GAME_RW_YELLOW - GAME_RW_ASPHALT);
-    }
-  }
-`
-);
-const WEAR_UNIFORM_DECL = (
-  /* glsl */
-  `
-uniform vec3 uWearPanel;        // 패널라인 간격 (x, y, z) [m] — 0이면 그 축은 없음
-uniform float uWearPanelDepth;  // 0~1
-uniform float uWearEdge;        // 0~1
-uniform float uWearDirt;        // 0~1
-uniform vec2 uWearSoot;         // 그을음: 로컬 z (시작, 끝). 끝 ≤ 시작이면 없음
-uniform vec2 uWearMud;          // 진흙: 로컬 y (위, 아래). 위 ≤ 아래면 없음
-uniform float uWearSeed;
-`
-);
-const WEAR_VARYING_DECL = (
-  /* glsl */
-  `
-varying vec3 vWearLocal;
-varying vec3 vWearNLocal;
-varying vec3 vWearWorld;
-varying vec3 vWearNWorld;
-varying mat3 vWearL2V;
-`
-);
-const WEAR_VERT_BODY = (
-  /* glsl */
-  `
-  vWearLocal = transformed;
-  vWearNLocal = objectNormal;
-  vWearWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
-  vWearNWorld = normalize(mat3(modelMatrix) * objectNormal);
-  vWearL2V = normalMatrix;
-`
-);
-const WEAR_GLSL = (
-  /* glsl */
-  `
-/** 한 축의 패널라인 — 0~1. grad는 홈의 법선 기울기 부호(선 중심을 향한다). */
-float wearPanelLine(float c, float spacing, out float grad) {
-  grad = 0.0;
-  if (spacing <= 0.0) return 0.0;
-  float fw = fwidth(c);
-  float d = (fract(c / spacing + 0.5) - 0.5) * spacing;   // 가장 가까운 선까지 부호 거리 [m]
-  float w = max(0.004, fw * 1.2);                           // 반폭 — 픽셀보다 좁아지지 않게
-  float m = 1.0 - smoothstep(w * 0.5, w * 1.6, abs(d));
-  // 간격이 픽셀 몇 개로 줄면 선이 무아레가 된다 — 지운다.
-  m *= 1.0 - smoothstep(0.10, 0.28, fw / spacing);
-  grad = -sign(d) * m;
-  return m;
-}
-
-/** 마모를 한꺼번에 — 색·거칠기·금속성을 고치고, 법선을 꺾을 로컬 기울기를 낸다. */
-void wearApply(inout vec3 albedo, inout float rough, inout float metal, out vec3 lineGradLocal) {
-  vec3 p = vWearLocal;
-  vec3 n = normalize(vWearNLocal);
-  vec3 seed = vec3(uWearSeed * 7.31, uWearSeed * 3.17, uWearSeed * 5.53);
-
-  // --- 패널라인: 삼면 투영 -------------------------------------------------
-  vec3 w = pow(abs(n), vec3(4.0));
-  w /= max(w.x + w.y + w.z, 1.0e-5);
-  float gx, gy, gz;
-  float lx = wearPanelLine(p.x, uWearPanel.x, gx);
-  float ly = wearPanelLine(p.y, uWearPanel.y, gy);
-  float lz = wearPanelLine(p.z, uWearPanel.z, gz);
-  // 축 k 방향에서 본 면에는 나머지 두 축의 선이 그어진다.
-  float line = w.y * max(lx, lz) + w.x * max(ly, lz) + w.z * max(lx, ly);
-  line *= uWearPanelDepth;
-  lineGradLocal = vec3(gx * (w.y + w.z), gy * (w.x + w.z), gz * (w.y + w.x)) * uWearPanelDepth;
-
-  // --- 엣지웨어: 화면공간 곡률 ----------------------------------------------
-  float pw = max(length(fwidth(vWearWorld)), 1.0e-5);
-  float curv = length(fwidth(vWearNWorld)) / pw;
-  float edge = smoothstep(10.0, 35.0, curv) * uWearEdge;
-  edge *= 1.0 - smoothstep(0.012, 0.045, pw);                // 베벨보다 픽셀이 크면 지운다
-  edge *= smoothstep(0.30, 0.62, fbm3(p * 46.0 + seed));      // 군데군데 벗겨진다
-
-  // --- 오염: 세로 줄무늬 · 밑면 때 · 윗면 먼지 --------------------------------
-  // 줄무늬는 로컬 위아래로 늘린 노이즈 — 옆면에서 흘러내린 자국.
-  float streak = fbm3(vec3(p.x * 13.0, p.y * 2.6, p.z * 13.0) + seed);
-  float side = 1.0 - abs(n.y);
-  float under = max(-n.y, 0.0);
-  float top = max(n.y, 0.0);
-  float dirt = uWearDirt * (
-      0.55 * side * smoothstep(0.38, 0.72, streak)
-    + 0.40 * under * smoothstep(0.30, 0.60, fbm3(p * 19.0 + seed * 1.3))
-    + 0.18 * top * fbm3(p * 31.0 + seed * 0.7));
-  dirt = clamp(dirt, 0.0, 1.0);
-
-  // --- 그을음: 배기 뒤 축방향 누적 -----------------------------------------
-  float soot = 0.0;
-  if (uWearSoot.y > uWearSoot.x) {
-    soot = smoothstep(uWearSoot.x, uWearSoot.y, p.z) * (0.55 + 0.45 * fbm3(p * 9.0 + seed));
-  }
-
-  // --- 진흙: 아래로 갈수록 -------------------------------------------------
-  float mud = 0.0;
-  if (uWearMud.x > uWearMud.y) {
-    mud = smoothstep(uWearMud.x, uWearMud.y, p.y) * (0.45 + 0.55 * fbm3(p * 6.5 + seed));
-  }
-
-  // --- 겹치는 순서: 홈 → 오염 → 그을음 → 진흙 → 마지막에 벗겨진 금속 ----------
-  albedo *= 1.0 - line * 0.45;
-  rough = mix(rough, 0.85, line * 0.6);
-
-  albedo = mix(albedo, albedo * vec3(0.55, 0.50, 0.42), dirt);
-  rough = mix(rough, 0.90, dirt * 0.6);
-
-  albedo = mix(albedo, albedo * 0.22, soot);
-  rough = mix(rough, 0.95, soot);
-
-  albedo = mix(albedo, vec3(0.16, 0.12, 0.08), mud * 0.85);
-  rough = mix(rough, 0.95, mud);
-
-  albedo = mix(albedo, vec3(0.52, 0.53, 0.55), edge);
-  metal = mix(metal, 0.85, edge);
-  rough = mix(rough, 0.32, edge);
-}
-`
-);
-const WEAR_FRAG_BODY = (
-  /* glsl */
-  `
-  vec3 wearLineGrad;
-  wearApply(diffuseColor.rgb, roughnessFactor, metalnessFactor, wearLineGrad);
-`
-);
-const WEAR_NORMAL_BODY = (
-  /* glsl */
-  `
-  normal = normalize(normal + vWearL2V * (wearLineGrad * 0.35));
-`
-);
-const NOISE_GLSL = (
-  /* glsl */
-  `
-#ifndef NOISE_GLSL_G
-#define NOISE_GLSL_G
-vec2 hash2(vec2 p) {
-  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-  return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
-}
-
-/** 그래디언트 노이즈 — (값, ∂/∂x, ∂/∂y). 값은 대략 [−0.7, 0.7]. */
-vec3 gnoise2(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
-  vec2 ga = hash2(i);
-  vec2 gb = hash2(i + vec2(1.0, 0.0));
-  vec2 gc = hash2(i + vec2(0.0, 1.0));
-  vec2 gd = hash2(i + vec2(1.0, 1.0));
-  float va = dot(ga, f);
-  float vb = dot(gb, f - vec2(1.0, 0.0));
-  float vc = dot(gc, f - vec2(0.0, 1.0));
-  float vd = dot(gd, f - vec2(1.0, 1.0));
-  float k1 = vb - va;
-  float k2 = vc - va;
-  float k3 = va - vb - vc + vd;
-  float v = va + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
-  vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
-         + du * (vec2(k1, k2) + k3 * vec2(u.y, u.x));
-  return vec3(v, d);
-}
-
-/** 3D 값 노이즈 — 재질 마모용. 그래디언트 노이즈보다 싸고(해시 8번) 표면 얼룩에는 충분하다. */
-float hash31(vec3 p) {
-  p = fract(p * 0.1031);
-  p += dot(p, p.yzx + 33.33);
-  return fract((p.x + p.y) * p.z);
-}
-
-float vnoise3(vec3 p) {
-  vec3 i = floor(p);
-  vec3 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  float a = mix(hash31(i), hash31(i + vec3(1.0, 0.0, 0.0)), f.x);
-  float b = mix(hash31(i + vec3(0.0, 1.0, 0.0)), hash31(i + vec3(1.0, 1.0, 0.0)), f.x);
-  float c = mix(hash31(i + vec3(0.0, 0.0, 1.0)), hash31(i + vec3(1.0, 0.0, 1.0)), f.x);
-  float d = mix(hash31(i + vec3(0.0, 1.0, 1.0)), hash31(i + vec3(1.0, 1.0, 1.0)), f.x);
-  return mix(mix(a, b, f.y), mix(c, d, f.y), f.z);
-}
-
-/** 3옥타브 fBm — 0~0.875. */
-float fbm3(vec3 p) {
-  return 0.5 * vnoise3(p) + 0.25 * vnoise3(p * 2.07 + 1.7) + 0.125 * vnoise3(p * 4.13 + 3.1);
-}
-
-/** fBm — 값만. 옥타브는 최대 5, 라쿠나리티 2.03(정수를 피해 반복 무늬를 줄인다). */
-float fbm2(vec2 p, int octaves) {
-  float v = 0.0;
-  float a = 0.5;
-  float norm = 0.0;
-  for (int i = 0; i < 5; i++) {
-    if (i >= octaves) break;
-    v += a * gnoise2(p).x;
-    norm += a;
-    p = p * 2.03 + vec2(17.3, 9.1);
-    a *= 0.5;
-  }
-  return v / max(norm, 1.0e-6);
-}
-#endif
-`
-);
-const NONE = [0, 0];
-const WEAR_BY_MATERIAL = {
-  // --- 기체 (전장 3.5 m, 동체 z −1.75…+1.50, 기수 −z) --------------------------
-  // 패널: 동체 링 프레임(z 0.42 m 간격)과 날개 리브/스파(x 0.30 m). 그을음은 추진부 —
-  // +0.9부터 뒤로 짙어진다. 끝값 1.77은 꼬리 페어링이 있던 때의 동체 끝이지만 **그대로 둔다**:
-  // Airframe은 날개·핀도 쓰므로 끝값을 지금 동체 끝(+1.50)으로 당기면 날개 뒷전 띠 전체가 거의
-  // 새까매진다(뒷전 z 1.45에서 0.69 → 0.98). 그 대신 동체 뒤 끝은 0.76까지만 짙어진다.
-  // 드러난 엔진·프로펠러는 재질 이름이 달라 그을음을 안 받는다.
-  // 패널라인은 **뺐다** — 삼면 투영 격자가 곡면 동체에서 이불 누비무늬로 읽혔다
-  // (사용자 지적: "격자무늬는 없는 게 낫다"). 오염도 근접에서 얼룩덜룩해 줄였다.
-  Airframe: {
-    panel: [0, 0, 0],
-    panelDepth: 0,
-    edge: 0.3,
-    dirt: 0.18,
-    soot: [0.9, 1.77],
-    mud: NONE,
-    seed: 3
-  },
-  // 타면은 별 부품이라 패널 없이 힌지 쪽 마모와 때만.
-  ControlSurface: {
-    panel: [0, 0, 0],
-    panelDepth: 0,
-    edge: 0.35,
-    dirt: 0.18,
-    soot: NONE,
-    mud: NONE,
-    seed: 7
-  },
-  // --- 발사관 (지상 장비 — 이야기의 대부분이 진흙과 긁힘) -------------------------
-  LauncherOlive: {
-    panel: [0.45, 0, 0.6],
-    panelDepth: 0.5,
-    edge: 0.6,
-    dirt: 0.55,
-    soot: NONE,
-    mud: [0.75, 0.42],
-    seed: 11
-  },
-  LauncherFrame: {
-    panel: [0, 0, 0],
-    panelDepth: 0,
-    edge: 0.7,
-    dirt: 0.6,
-    soot: NONE,
-    mud: [0.8, 0.4],
-    seed: 13
-  },
-  Metal: {
-    panel: [0, 0, 0],
-    panelDepth: 0,
-    edge: 0.85,
-    dirt: 0.45,
-    soot: NONE,
-    mud: [0.65, 0.4],
-    seed: 17
-  },
-  DarkDetail: {
-    panel: [0, 0, 0],
-    panelDepth: 0,
-    edge: 0.3,
-    dirt: 0.4,
-    soot: NONE,
-    mud: [0.55, 0.35],
-    seed: 19
-  }
-  // CanisterInner는 뺀다 — 관 안쪽은 거의 안 보이고, 보일 때는 어둠이 이야기다.
-};
-function applyGroundDetail(material, uniforms) {
-  const m2 = material;
-  if (m2.__ground) return;
-  m2.__ground = true;
-  const prevCompile = material.onBeforeCompile;
-  const prevKey = material.customProgramCacheKey;
-  material.onBeforeCompile = function(shader, renderer) {
-    prevCompile.call(this, shader, renderer);
-    Object.assign(shader.uniforms, uniforms);
-    shader.vertexShader = shader.vertexShader.replace("#include <common>", `#include <common>
-${GROUND_VERT_DECL}`).replace("#include <fog_vertex>", `#include <fog_vertex>
-${GROUND_VERT_BODY}`);
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <common>",
-      `#include <common>
-${GROUND_VARYING_DECL}
-${ATMOSPHERE_UNIFORM_DECL}
-${ATMOSPHERE_GLSL}
-${CLOUD_UNIFORM_DECL}
-${NOISE_GLSL}
-${CLOUD_COVER_GLSL}
-${COAST_GLSL}
-${GROUND_UNIFORM_DECL}
-${RUNWAY_UNIFORM_DECL}
-${RUNWAY_GLSL}
-${GROUND_GLSL}`
-    ).replace(
-      "#include <metalnessmap_fragment>",
-      `#include <metalnessmap_fragment>
-${GROUND_FRAG_BODY}`
-    ).replace(
-      "#include <normal_fragment_begin>",
-      `#include <normal_fragment_begin>
-${GROUND_NORMAL_BODY}`
-    ).replace(
-      "#include <lights_fragment_end>",
-      `#include <lights_fragment_end>
-${GROUND_LIGHT_BODY}`
-    );
-  };
-  material.customProgramCacheKey = function() {
-    return `ground-v2|${prevKey.call(this)}`;
-  };
-  material.needsUpdate = true;
-}
-function applyGameRunway(material, uniforms) {
-  const m2 = material;
-  if (m2.__gameRunway) return;
-  m2.__gameRunway = true;
-  const prevCompile = material.onBeforeCompile;
-  const prevKey = material.customProgramCacheKey;
-  material.onBeforeCompile = function(shader, renderer) {
-    prevCompile.call(this, shader, renderer);
-    Object.assign(shader.uniforms, uniforms);
-    shader.vertexShader = shader.vertexShader.replace("#include <common>", `#include <common>
-${RUNWAY_GAME_VARYING_DECL}`).replace("#include <fog_vertex>", `#include <fog_vertex>
-${RUNWAY_GAME_VERT_BODY}`);
-    shader.fragmentShader = shader.fragmentShader.replace("#include <common>", `#include <common>
-${RUNWAY_GAME_VARYING_DECL}
-${RUNWAY_UNIFORM_DECL}
-${RUNWAY_GLSL}
-${RUNWAY_GAME_GLSL}`).replace("#include <color_fragment>", `#include <color_fragment>
-${RUNWAY_GAME_FRAG_BODY}`);
-  };
-  material.customProgramCacheKey = function() {
-    return `game-runway-v1|${prevKey.call(this)}`;
-  };
-  material.needsUpdate = true;
-}
-const WEAR_NOTES = {
-  model: "기체·발사관의 패널라인·긁힘·오염·그을음·진흙은 절차 생성 표시 효과이며 실제 기체의 상태·도장이 아닙니다."
-};
-function applyWear(material, cfg) {
-  const m2 = material;
-  if (m2.__wear) return;
-  m2.__wear = true;
-  const prevCompile = material.onBeforeCompile;
-  const prevKey = material.customProgramCacheKey;
-  material.onBeforeCompile = function(shader, renderer) {
-    prevCompile.call(this, shader, renderer);
-    Object.assign(shader.uniforms, {
-      uWearPanel: { value: cfg.panel },
-      uWearPanelDepth: { value: cfg.panelDepth },
-      uWearEdge: { value: cfg.edge },
-      uWearDirt: { value: cfg.dirt },
-      uWearSoot: { value: cfg.soot },
-      uWearMud: { value: cfg.mud },
-      uWearSeed: { value: cfg.seed }
-    });
-    shader.vertexShader = shader.vertexShader.replace("#include <common>", `#include <common>
-${WEAR_VARYING_DECL}`).replace("#include <fog_vertex>", `#include <fog_vertex>
-${WEAR_VERT_BODY}`);
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <common>",
-      `#include <common>
-${WEAR_UNIFORM_DECL}
-${WEAR_VARYING_DECL}
-${NOISE_GLSL}
-${WEAR_GLSL}`
-    ).replace(
-      "#include <metalnessmap_fragment>",
-      `#include <metalnessmap_fragment>
-${WEAR_FRAG_BODY}`
-    ).replace(
-      "#include <normal_fragment_begin>",
-      `#include <normal_fragment_begin>
-${WEAR_NORMAL_BODY}`
-    );
-  };
-  material.customProgramCacheKey = function() {
-    return `wear-v1|${prevKey.call(this)}`;
-  };
-  material.needsUpdate = true;
-}
 function finite(v2) {
   return typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 }
@@ -41664,6 +39828,55 @@ function propellerRate(thrL, thrR, maxRadPerSec = 220) {
   const mean = Math.min(Math.max((l2 + r2) / 2, 0), 1);
   return mean * maxRadPerSec;
 }
+const G = 9.80665;
+function significantWaveHeight(windSpeed) {
+  const u2 = Math.max(windSpeed, 0);
+  return 0.21 * u2 * u2 / G;
+}
+function peakWavelength(windSpeed) {
+  const u2 = Math.max(windSpeed, 0.5);
+  const omegaP = 0.877 * G / u2;
+  return 2 * Math.PI * G / (omegaP * omegaP);
+}
+function coxMunkSlopeVariance(windSpeed) {
+  return 3e-3 + 512e-5 * Math.max(windSpeed, 0);
+}
+const COMPONENTS = [
+  { lengthRatio: 1.9, weight: 1, spreadDeg: 0 },
+  // 너울 — 바람 방향
+  { lengthRatio: 1.15, weight: 0.78, spreadDeg: -22 },
+  { lengthRatio: 0.62, weight: 0.52, spreadDeg: 31 },
+  { lengthRatio: 0.31, weight: 0.34, spreadDeg: -47 },
+  { lengthRatio: 0.15, weight: 0.21, spreadDeg: 58 }
+  // 중파 — 방향이 가장 벌어진다
+];
+const WAVE_COUNT = COMPONENTS.length;
+function gerstnerSet(windSpeed, windDirRad, steepness = 0.65) {
+  const hs = significantWaveHeight(windSpeed);
+  const lp = peakWavelength(windSpeed);
+  const wsum = COMPONENTS.reduce((s2, c) => s2 + c.weight * c.weight, 0);
+  const scale = wsum > 0 ? Math.sqrt(hs * hs / 8 / wsum) : 0;
+  const s = Math.min(Math.max(steepness, 0), 1);
+  return COMPONENTS.map((c) => {
+    const length = Math.max(lp * c.lengthRatio, 0.5);
+    const k2 = 2 * Math.PI / length;
+    const amplitude = scale * c.weight;
+    const a = windDirRad + c.spreadDeg * Math.PI / 180;
+    const q2 = amplitude > 0 ? s / (k2 * amplitude * WAVE_COUNT) : 0;
+    return {
+      dir: [Math.cos(a), Math.sin(a)],
+      length,
+      amplitude,
+      k: k2,
+      omega: Math.sqrt(G * k2),
+      q: q2
+    };
+  });
+}
+const WAVE_NOTES = {
+  displayOnly: "해상 상태(풍속·파고·파향)는 표시 값이며 시뮬 입력이 아닙니다 — 비행동역학은 이 값을 모릅니다.",
+  model: "파면은 게르스트너 성분 5개(심해 분산관계 ω²=gk)이고 파고는 피어슨-모스코비츠 H_s=0.21U²/g입니다. 윤슬 폭은 콕스-먼크 경사분산 σ²=0.003+0.00512U에서 나옵니다."
+};
 const CopyShader = {
   name: "CopyShader",
   uniforms: {
@@ -43348,7 +41561,8 @@ function createPost(renderer, scenePass, width, height, opts) {
 function disposeMaterial(mat) {
   const m2 = mat;
   if (m2 == null) return;
-  for (const v2 of Object.values(m2)) {
+  for (const [k2, v2] of Object.entries(m2)) {
+    if (k2 === "envMap") continue;
     if (v2 && typeof v2 === "object" && "isTexture" in v2) {
       v2.dispose?.();
     }
@@ -43365,6 +41579,1550 @@ function disposeTree(root) {
     else disposeMaterial(mat);
   });
   root.clear();
+}
+const CLOUD_UNIFORM_DECL = (
+  /* glsl */
+  `
+#ifndef CLOUD_UNIFORM_DECL_G
+#define CLOUD_UNIFORM_DECL_G
+uniform float uCloudCover;    // 덮임 0~1 (표시 값)
+uniform float uCloudBase;     // 밑면 고도 [m]
+uniform float uCloudThick;    // 두께 [m]
+uniform vec2 uCloudWind;      // 흐름 [m/s] (렌더 x·z)
+uniform float uCloudTime;     // [s] — 시뮬 시각
+uniform float uCloudGain;     // 표시 보정 — 이 렌더러의 절대 밝기는 물리 단위가 아니다
+#endif
+`
+);
+const CLOUD_COVER_GLSL = (
+  /* glsl */
+  `
+/** 한 지점(수평 xz)의 구름 덮임 0~1 — 밀도의 2D 뼈대. */
+float cloudCoverAt(vec2 xz) {
+  vec2 q = (xz + uCloudWind * uCloudTime) * (1.0 / 2600.0);
+  float shape = fbm2(q, 4) * 0.5 + 0.5;
+  float th = 1.0 - uCloudCover;
+  return smoothstep(th - 0.08, th + 0.24, shape);
+}
+
+/** 월드 한 점에 드리우는 구름 그림자 0(그늘)~1(맑음).
+ *
+ *  점에서 태양 쪽으로 올라가 구름 밑면과 만나는 자리의 덮임을 읽는다 — 적분이 아니라
+ *  한 표본이라 반그림자는 덮임 경사가 대신한다(표시용 근사). 해가 지평에 붙으면 직사광
+ *  자체가 없으므로 그림자도 같이 걷는다. */
+float cloudShadowAt(vec3 p, vec3 sunDir) {
+  if (uCloudCover <= 0.001) return 1.0;
+  float up = max(sunDir.y, 0.08);
+  vec2 hit = p.xz + sunDir.xz * ((uCloudBase - p.y) / up);
+  float cover = cloudCoverAt(hit);
+  // 그늘 바닥 0.45 — 실제 구름 그늘도 하늘빛 산란광은 받는다. 우리 근사는 알베도를
+  // 통째로 줄여 주변광까지 어두워지므로, 바닥을 두어 그 과장을 되돌린다.
+  float strength = smoothstep(0.05, 0.35, sunDir.y);
+  return 1.0 - (1.0 - 0.45) * cover * strength;
+}
+
+/** 직사광이 구름을 지나 오는 비율 0.15~1 — **직사광 항에만** 곱한다(지면 재질).
+ *
+ *  cloudShadowAt과 같은 덮임 표본인데 바닥이 다르다. 그쪽은 알베도에 곱하던 때의 근사라
+ *  주변광까지 어두워지는 과장을 바닥 0.45로 되돌렸다. 지면은 이제 조명이 끝난 뒤 직사광만
+ *  깎으므로 그늘의 하늘빛은 그대로 산다 — 실제 구름 그늘처럼 직사광이 대부분 막힌다. */
+float cloudSunTransmit(vec3 p, vec3 sunDir) {
+  if (uCloudCover <= 0.001) return 1.0;
+  float up = max(sunDir.y, 0.08);
+  vec2 hit = p.xz + sunDir.xz * ((uCloudBase - p.y) / up);
+  float strength = smoothstep(0.05, 0.35, sunDir.y);
+  return 1.0 - 0.85 * cloudCoverAt(hit) * strength;
+}
+`
+);
+function cloudGlsl(steps, lightSteps) {
+  const S2 = Math.max(1, Math.round(steps));
+  const LS = Math.max(1, Math.round(lightSteps));
+  return (
+    /* glsl */
+    `
+const float CLOUD_EARTH_R = 6371000.0;
+const float CLOUD_SIGMA = 0.02;     // 소산계수 [1/m] — 두께 600 m에서 광학두께 12
+
+/** 카메라(고도 camY)에서 방향 d로 반지름 R+alt 구 껍질까지의 두 교점 거리. 없으면 false. */
+bool cloudShell(float camY, vec3 d, float alt, out float tNear, out float tFar) {
+  float oy = CLOUD_EARTH_R + camY;
+  float b = oy * d.y;
+  float r = CLOUD_EARTH_R + alt;
+  float c = oy * oy - r * r;
+  float disc = b * b - c;
+  if (disc < 0.0) { tNear = -1.0; tFar = -1.0; return false; }
+  float s = sqrt(disc);
+  tNear = -b - s;
+  tFar = -b + s;
+  return true;
+}
+
+/** 슬래브 안의 적분 구간 [t0, t1]. 구간이 없으면 false. */
+bool cloudSpan(float camY, vec3 d, out float t0, out float t1) {
+  float base = uCloudBase;
+  float top = uCloudBase + uCloudThick;
+  float bN, bF, tN, tF;
+  bool hitB = cloudShell(camY, d, base, bN, bF);
+  bool hitT = cloudShell(camY, d, top, tN, tF);
+  if (camY < base) {
+    // 아래에서 본다 — 지평 아래로 향하는 시선은 지면이 가린다(평평한 지형이 50 km까지).
+    if (d.y < -0.005 || !hitT) return false;
+    t0 = max(bF, 0.0);
+    t1 = tF;
+  } else if (camY > top) {
+    // 위에서 본다 — 내려가는 시선만 만난다.
+    if (d.y >= 0.0 || !hitT || tN <= 0.0) return false;
+    t0 = tN;
+    t1 = (hitB && bN > 0.0) ? bN : tF;
+  } else {
+    // 슬래브 안 — 여기서 시작한다.
+    t0 = 0.0;
+    t1 = (d.y >= 0.0) ? tF : ((hitB && bN > 0.0) ? bN : tF);
+  }
+  return t1 > t0;
+}
+
+/** 한 점의 구름 밀도 0~1. 2D 뼈대는 cloudCoverAt — 지면 그림자와 같은 함수다. */
+float cloudDensity(vec3 p, vec2 drift) {
+  float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
+  float cov = cloudCoverAt(p.xz);
+  if (cov <= 0.001) return 0.0;
+  // 수직 프로파일 — 밑은 평평하게 잘리고, 윗면은 덮임이 짙을수록 높이 솟는다.
+  float top = 0.30 + 0.70 * cov;
+  float prof = smoothstep(0.0, 0.10, hN) * (1.0 - smoothstep(top - 0.30, top, hN));
+  float dens = cov * prof;
+  if (dens <= 0.002) return 0.0;
+  // 가장자리 침식 — 얇은 곳부터 깎여 뭉게구름의 너덜너덜한 윤곽이 된다.
+  float det = fbm2((p.xz + drift * 1.4) * (1.0 / 420.0) + hN * 0.9, 3) * 0.5 + 0.5;
+  return clamp(dens - (1.0 - det) * 0.55 * (1.0 - dens), 0.0, 1.0);
+}
+
+/** 구름 위상 — 두 갈래 HG. 4π를 곱해 무차원(방향 평균 1)으로 둔다. */
+float cloudPhase(float c) {
+  return 4.0 * 3.14159265 * (0.65 * phaseMie(c, 0.55) + 0.35 * phaseMie(c, -0.35));
+}
+
+/** 시선 하나의 구름 — rgb는 복사휘도(대기 감쇠·in-scatter 포함), a는 투과율.
+ *  camPos는 월드, dir·sunDir은 정규화. 구름이 없으면 (0,0,0,1). */
+vec4 cloudLayer(vec3 camPos, vec3 dir, vec3 sunDir, float sunIntensity, float haze) {
+  float t0, t1;
+  if (uCloudCover <= 0.001 || !cloudSpan(camPos.y, dir, t0, t1)) return vec4(0.0, 0.0, 0.0, 1.0);
+  // 스치는 시선은 슬래브를 아주 길게 지난다. 너무 길면 표본이 성겨져 **구름이 층층이
+  // 썬 것처럼** 보이고(14배·10걸음에서 실측), 지평선이 통째로 덮인다. 두께의 8배에서
+  // 자른다 — 그 너머는 어차피 대기가 지운다.
+  t1 = min(t1, t0 + uCloudThick * 8.0);
+
+  vec2 drift = uCloudWind * uCloudTime;
+  vec3 sunCol = sunThroughAtmosphere(sunDir, sunIntensity, haze);
+  // 환경광 — 천정 하늘빛. 밑면은 그늘이라 절반, 윗면은 그대로.
+  vec3 skyUp = skyRadiance(vec3(0.0, 1.0, 0.0), sunDir, sunIntensity, haze);
+  float ph = cloudPhase(dot(dir, sunDir));
+
+  float T = 1.0;
+  vec3 L = vec3(0.0);
+  float dt = (t1 - t0) / float(${S2});
+  float lstep = uCloudThick * 0.7 / float(${LS});
+  // 시작점을 픽셀마다 한 걸음 안에서 흔든다 — 남는 줄무늬가 결이 고운 잡음이 된다.
+  // 시선 방향의 해시라 화면 좌표가 없어도 픽셀마다 다르다.
+  float jitter = hash2(dir.xy * 4096.0 + dir.zz * 1731.0).x * 0.5 + 0.5;
+  for (int i = 0; i < ${S2}; i++) {
+    float t = t0 + (float(i) + jitter) * dt;
+    vec3 p = camPos + dir * t;
+    float rho = cloudDensity(p, drift);
+    if (rho <= 0.002) continue;
+    // 태양 쪽 광학두께 — 몇 걸음이면 밑면이 어둡고 윗면이 밝은 것은 나온다.
+    float od = 0.0;
+    for (int j = 0; j < ${LS}; j++) {
+      od += cloudDensity(p + sunDir * ((float(j) + 0.6) * lstep), drift) * lstep;
+    }
+    float Ts = exp(-CLOUD_SIGMA * od);
+    float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
+    vec3 direct = sunCol * Ts * ph;
+    vec3 amb = skyUp * mix(0.45, 1.0, hN);
+    // 이 구간이 산란해 내는 몫(알베도 ≈ 1). 앞에서 뒤로 쌓는다.
+    float a = 1.0 - exp(-CLOUD_SIGMA * rho * dt);
+    L += (direct + amb) * a * T;
+    T *= 1.0 - a;
+    if (T < 0.02) break;
+  }
+  if (T > 0.999) return vec4(0.0, 0.0, 0.0, 1.0);
+
+  // 대기 — 구름까지의 거리로. 지형·하늘·바다와 같은 함수다.
+  vec3 Ta, Sa;
+  atmosphere(dir, sunDir, sunIntensity, haze, t0, Ta, Sa);
+  return vec4(L * uCloudGain * Ta + Sa * (1.0 - T), T);
+}
+`
+  );
+}
+const GROUND_UNIFORM_DECL = (
+  /* glsl */
+  `
+uniform sampler2D uHeightFine;     // 촘촘한 티어 표고 [m] (반정밀도, 선형 필터)
+uniform sampler2D uHeightCoarse;   // 넓은 티어 표고 [m]
+uniform vec4 uHFine;               // (e0, n0, 간격 [m], 0) — 칸 (0, 0)의 NED와 격자 간격
+uniform vec2 uHFineSize;           // (열, 행)
+uniform vec4 uHCoarse;
+uniform vec2 uHCoarseSize;
+uniform float uHeightOn;           // 0이면 표고 텍스처가 없다 — 자체 그림자를 건너뛴다
+uniform float uTerrainTop;         // 팩 최고 표고 [m] — 그림자 광선이 이보다 높아지면 멈춘다
+`
+);
+const GROUND_VARYING_DECL = (
+  /* glsl */
+  `
+varying vec3 vGroundWorld;
+varying vec3 vGroundNormal;
+varying vec2 vGroundShade;   // (하늘 열림, 볼록도) — core/terrainshade.ts가 정점에 굽는다
+`
+);
+const GROUND_VERT_DECL = (
+  /* glsl */
+  `
+attribute vec2 aTerrain;
+${GROUND_VARYING_DECL}
+`
+);
+const GROUND_VERT_BODY = (
+  /* glsl */
+  `
+  vGroundWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+  vGroundNormal = normalize(mat3(modelMatrix) * objectNormal);
+  vGroundShade = aTerrain;
+`
+);
+const GROUND_GLSL = (
+  /* glsl */
+  `
+// ---- 지표 피복 알베도 (선형) — sRGB 감각으로 고른 색을 2.2제곱해 적었다. 표시 값이다.
+const vec3 GR_CONIFER   = vec3(0.028, 0.045, 0.020);
+const vec3 GR_BROAD     = vec3(0.055, 0.085, 0.030);
+const vec3 GR_AUTUMN    = vec3(0.120, 0.095, 0.028);
+const vec3 GR_UNDER     = vec3(0.014, 0.018, 0.011);   // 수관 사이 그늘진 바닥
+const vec3 GR_RICE_RIPE = vec3(0.300, 0.235, 0.075);   // 익은 벼 (10월)
+const vec3 GR_RICE_GRN  = vec3(0.135, 0.165, 0.050);   // 덜 익은 벼 (황록)
+const vec3 GR_STUBBLE   = vec3(0.215, 0.165, 0.090);   // 벤 논
+const vec3 GR_SOIL      = vec3(0.150, 0.115, 0.075);   // 갈아엎은 밭
+const vec3 GR_VEG       = vec3(0.095, 0.130, 0.050);   // 채소밭
+const vec3 GR_VINYL     = vec3(0.360, 0.375, 0.385);   // 비닐하우스 (먼지 낀 흰 비닐)
+const vec3 GR_DIKE      = vec3(0.110, 0.125, 0.055);   // 논둑 풀
+const vec3 GR_ROAD      = vec3(0.280, 0.270, 0.250);   // 농로 콘크리트
+const vec3 GR_ROCK      = vec3(0.190, 0.175, 0.150);
+const vec3 GR_MUD_WET   = vec3(0.055, 0.052, 0.046);
+const vec3 GR_MUD_DRY   = vec3(0.150, 0.132, 0.105);
+const vec3 GR_YARD      = vec3(0.180, 0.170, 0.155);   // 마당·골목
+const vec3 GR_GRASS     = vec3(0.125, 0.145, 0.060);   // 깎은 풀 (비행장, 10월의 누런 풀빛)
+const vec3 GR_ASPHALT   = vec3(0.070, 0.070, 0.075);
+const vec3 GR_GRASS_DRY = vec3(0.165, 0.150, 0.070);   // 깎은 풀밭의 마른 자리
+const vec3 GR_PAINT     = vec3(0.600, 0.600, 0.580);   // 활주로 흰 도색 (닳은 흰색)
+const vec3 GR_PAINT_YEL = vec3(0.520, 0.360, 0.040);   // 과주로 노란 갈매기표
+
+float grHash(vec2 c, float k) { return hash31(vec3(c, k)); }
+
+/** 들 — 블록(보로노이 약 420 m)마다 방향과 필지 크기가 다르고, 블록 안은 회전 격자다.
+ *  parcel 필지 난수, dike 가장 가까운 둑까지 [m], road 블록 경계(농로)까지 [m], block 블록 난수,
+ *  q 필지 좌표 [m](x가 필지의 긴 변 — 이랑·콤바인 자국은 이 축과 나란하다).
+ *
+ *  **회전각은 블록마다 상수다.** 처음에 지역 방향을 픽셀마다 노이즈로 뽑았더니, 각이 조금만
+ *  변해도 원점에서 수 km 떨어진 좌표가 크게 돌아가 필지가 동심원 호처럼 휘었다(화면 실측). 그래서
+ *  지역 방향도 블록 중심에서 한 번 읽고, 회전은 블록 중심 기준 좌표로 한다(정밀도도 산다). */
+void grFields(vec2 p, out float parcel, out float dike, out float road, out float block, out vec2 q) {
+  const float BLOCK = 420.0;
+  vec2 bp = p / BLOCK;
+  vec2 bi = floor(bp);
+  float d1 = 1.0e9;
+  float d2 = 1.0e9;
+  vec2 best = bi;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 c = bi + vec2(float(i), float(j));
+      vec2 o = c + 0.15 + 0.7 * vec2(grHash(c, 1.0), grHash(c, 2.0));
+      float d = length(bp - o);
+      if (d < d1) { d2 = d1; d1 = d; best = c; }
+      else if (d < d2) { d2 = d; }
+    }
+  }
+  vec2 center = (best + 0.5) * BLOCK;
+  float ang = 3.0 * vnoise3(vec3(center * (1.0 / 2600.0), 9.1)) + (grHash(best, 4.0) - 0.5) * 0.9;
+  vec2 dir = vec2(cos(ang), sin(ang));
+  vec2 lp = p - center;
+  q = vec2(dot(lp, dir), dot(lp, vec2(-dir.y, dir.x)));
+  vec2 cell = mix(vec2(60.0, 24.0), vec2(115.0, 46.0), vec2(grHash(best, 5.0), grHash(best, 6.0)));
+  vec2 g = q / cell;
+  vec2 fi = floor(g);
+  vec2 fr = g - fi;
+  vec2 edge = min(fr, 1.0 - fr) * cell;
+  parcel = grHash(fi + best * 31.0, 7.0);
+  dike = min(edge.x, edge.y);
+  road = (d2 - d1) * BLOCK * 0.5;
+  block = grHash(best, 3.0);
+}
+
+/** 수관 — 7 m 격자에 한 그루씩, 반지름 2.3~3.9 m 포물면 돔(꼭대기 0.7 R). 겹치면 높은 쪽.
+ *  돌려주는 것: x 덮임(0 빈틈 ~ 1 꼭대기), y 높이 [m], zw 높이의 기울기(세계 xz). */
+vec4 grCrowns(vec2 p) {
+  const float CELL = 7.0;
+  vec2 gi = floor(p / CELL);
+  vec4 res = vec4(0.0);
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 c = gi + vec2(float(i), float(j));
+      vec2 center = (c + 0.2 + 0.6 * vec2(grHash(c, 11.0), grHash(c, 12.0))) * CELL;
+      float R = 2.3 + 1.6 * grHash(c, 13.0);
+      vec2 d = p - center;
+      float u = 1.0 - dot(d, d) / (R * R);
+      float h = u * R * 0.7;
+      if (u > 0.0 && h > res.y) { res = vec4(sqrt(u), h, d * (-1.4 / R)); }
+    }
+  }
+  return res;
+}
+
+/** 마을 — 15 m 집터에 집 한 채(62%), 지붕은 회색·청회·주황·녹색·흰색 중 하나.
+ *  돌려주는 것: rgb 지붕색, a 지붕 덮임(0이면 마당). */
+vec4 grVillage(vec2 p) {
+  const float LOT = 15.0;
+  vec2 g = p / LOT;
+  vec2 gi = floor(g);
+  vec2 off = abs(g - gi - 0.5);
+  if (grHash(gi, 21.0) > 0.62) return vec4(GR_YARD, 0.0);
+  vec2 hs = 0.22 + 0.16 * vec2(grHash(gi, 22.0), grHash(gi, 23.0));
+  float roofIn = step(off.x, hs.x) * step(off.y, hs.y);
+  float k = grHash(gi, 24.0);
+  vec3 roof = k < 0.30 ? vec3(0.20, 0.21, 0.22)
+            : k < 0.55 ? vec3(0.070, 0.110, 0.170)
+            : k < 0.75 ? vec3(0.320, 0.100, 0.050)
+            : k < 0.88 ? vec3(0.070, 0.150, 0.100)
+            : vec3(0.55, 0.55, 0.53);
+  return vec4(roof, roofIn);
+}
+
+/** 지표 피복 한 점 — 알베도·거칠기·미세 기울기(법선 흔들기)·젖음·미세 차폐.
+ *  p 세계 위치, n 기하 법선(세계, 정규화), shade (열림, 볼록도), shoreD 바다까지 [m] (모르면 큰 수),
+ *  pw 픽셀 발자국 [m], dxy 세계 xz의 화면 도함수 (dFdx의 x·z, dFdy의 x·z) — 활주로 도색이 축마다 발자국을 잰다. */
+void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
+             out vec3 albedo, out float rough, out vec2 grad, out float wet, out float occ) {
+  vec2 xz = p.xz;
+  float elev = p.y;
+  float ny = clamp(n.y, 0.05, 1.0);
+  float slope = sqrt(max(1.0 - ny * ny, 0.0)) / ny;   // 경사 tan
+  float convex = shade.y;
+
+  // 피복 경계를 흔드는 큰 무늬 — 멀어지면 평균(0.44)으로 접는다
+  // 다 접힌 거리에서는 노이즈를 아예 부르지 않는다 — 와이드샷 픽셀 대부분이 거기다
+  float nA = pw < 200.0 ? mix(fbm3(vec3(xz * (1.0 / 310.0), 1.7)), 0.44, smoothstep(80.0, 200.0, pw)) : 0.44;
+  float nB = pw < 60.0 ? mix(fbm3(vec3(xz * (1.0 / 95.0), 5.3)), 0.44, smoothstep(25.0, 60.0, pw)) : 0.44;
+
+  // ---- 가중치
+  // 갯벌 — 물가의 좁은 띠만. 처음엔 900 m까지 칠했는데, 간척지 안 작은 물웅덩이 둘레마다 둥근
+  // 검보라 무리가 생겼다(화면 실측). 해안 턱은 이제 해수면 판정이 바다로 흡수한다(core/seamask.ts).
+  float wWet = (1.0 - smoothstep(0.8, 2.5, elev)) * (1.0 - smoothstep(40.0, 150.0, shoreD + (nB - 0.44) * 160.0))
+             * (1.0 - smoothstep(0.07, 0.16, slope));
+  float flatness = 1.0 - smoothstep(0.05, 0.12, slope + (nB - 0.44) * 0.06);
+  float lowland = 1.0 - smoothstep(60.0, 150.0, elev - convex * 45.0 + (nA - 0.44) * 70.0);
+  // 들 가운데 작은 숲(마을숲·묘역) — 경계를 날카롭게. 반쯤 섞으면 들 위에 검은 수관이 흩뿌린 점으로 떴다
+  float woodlot = smoothstep(0.69, 0.715, nB);
+  float wField = flatness * lowland * (1.0 - woodlot) * (1.0 - wWet);
+  // 마을 — 산자락(경사가 막 오르는 띠)의 드문 군집. 처음 문턱(0.60)으로는 산마다 회색 띠가
+  // 둘려 시멘트 고리처럼 읽혔다(화면 실측) — 군집을 드물게, 띠를 좁게 했다.
+  float foot = smoothstep(0.035, 0.065, slope) * (1.0 - smoothstep(0.11, 0.17, slope)) * lowland;
+  float wVillage = foot * (1.0 - wWet)
+                 * smoothstep(0.70, 0.76, vnoise3(vec3(xz * (1.0 / 260.0), 13.0)));
+  float wRock = clamp(smoothstep(0.85, 1.4, slope + (nB - 0.44) * 0.7)
+                + smoothstep(0.55, 0.95, convex) * smoothstep(0.4, 0.8, slope) * 0.5, 0.0, 1.0);
+  float wShore = (1.0 - smoothstep(20.0, 55.0, shoreD)) * smoothstep(0.05, 0.14, slope);
+
+  // ---- 숲
+  float broad = smoothstep(0.30, 0.62, nA);
+  vec3 forest = mix(GR_CONIFER, GR_BROAD, broad);
+  if (elev > 120.0 && broad > 0.0) {
+    float autumn = smoothstep(0.55, 0.74, vnoise3(vec3(xz * (1.0 / 520.0), 2.2)))
+                 * smoothstep(120.0, 360.0, elev) * broad;
+    forest = mix(forest, GR_AUTUMN, autumn * 0.45);
+  }
+  float mott = pw < 30.0 ? mix(fbm3(vec3(xz * (1.0 / 34.0), 4.4)), 0.44, smoothstep(10.0, 30.0, pw)) : 0.44;
+  forest *= (0.72 + 0.62 * mott) * (1.0 + convex * 0.10);
+  vec2 forestGrad = vec2(0.0);
+  float forestOcc = 1.0;
+  float crownFade = 1.0 - smoothstep(1.2, 3.5, pw);
+  if (crownFade > 0.001) {
+    vec4 cr = grCrowns(xz);
+    vec3 crown = cr.x > 0.0 ? forest * (0.85 + 0.40 * cr.x) : GR_UNDER;
+    forest = mix(forest, crown, crownFade);
+    forestGrad = cr.zw * crownFade;
+    forestOcc = mix(1.0, 0.55 + 0.45 * cr.x, crownFade);
+  }
+  vec3 col = forest;
+  float rgh = 0.92;
+
+  // ---- 들
+  if (wField > 0.001) {
+    // 먼 들의 평균 — 지역마다(약 700 m) 익은 쪽·푸른 쪽으로 기운다. 필지 색의 면적 평균과 맞춘다
+    float region = vnoise3(vec3(xz * (1.0 / 700.0), 6.6));
+    vec3 field = mix(vec3(0.150, 0.160, 0.065), vec3(0.225, 0.190, 0.080), region)
+               * (0.9 + 0.22 * nB);
+    float frough = 0.88;
+    float parcelVis = 1.0 - smoothstep(10.0, 28.0, pw);
+    if (parcelVis > 0.001) {
+      float parcel, dikeD, roadD, block;
+      vec2 q;
+      grFields(xz, parcel, dikeD, roadD, block, q);
+      // 블록마다 주 작물이 있고 필지 셋 중 둘이 그것을 따른다 — 이웃끼리 닮고 블록끼리 갈린다.
+      // 필지마다 따로 뽑았더니 색이 센 바둑판이 됐다(화면 실측).
+      float dom = grHash(vec2(block * 977.0, 3.0), 31.0);
+      float u = parcel < 0.66 ? dom : fract(parcel * 7.13);
+      int kind = u < 0.40 ? 0 : u < 0.62 ? 1 : u < 0.82 ? 2 : u < 0.90 ? 3 : 4;
+      vec3 crop = kind == 0 ? GR_RICE_RIPE : kind == 1 ? GR_RICE_GRN : kind == 2 ? GR_STUBBLE
+                : kind == 3 ? GR_SOIL : GR_VEG;
+      crop *= 0.94 + 0.12 * fract(parcel * 53.0);
+      // 필지 안 결 — 벼 포기는 고운 얼룩, 벤 논은 콤바인 자국(2.2 m), 밭은 고랑(0.9 m), 채소는 이랑(1.2 m).
+      // 줄은 필지의 긴 변(q.x)과 나란하다. 줄 간격이 픽셀 몇 개로 줄면 접는다.
+      float spacing = kind == 2 ? 2.2 : kind == 3 ? 0.9 : 1.2;
+      float rowAmp = (kind == 2 ? 0.10 : kind == 3 ? 0.16 : kind == 4 ? 0.20 : 0.0)
+                   * (1.0 - smoothstep(spacing * 0.25, spacing * 0.6, pw));
+      float rows = sin(q.y * (6.2832 / spacing));
+      float grain = mix(fbm3(vec3(xz * (1.0 / 2.5), 7.7)) - 0.44, 0.0, smoothstep(0.8, 2.5, pw));
+      crop *= 1.0 + rowAmp * rows + 0.18 * grain;
+      if (kind == 4) crop = mix(crop, GR_SOIL, 0.35 * rowAmp * 5.0 * max(-rows, 0.0));
+      // 비닐하우스 — 몇 블록에 몰려, 폭 7 m 동이 1.5 m 틈을 두고 나란히(흩뿌리면 흰 점박이가 된다)
+      bool vinyl = block > 0.86 && parcel > 0.62;
+      if (vinyl) {
+        float house = (1.0 - smoothstep(0.78, 0.80, fract(q.y / 8.5)));
+        float ridge = 1.0 - abs(fract(q.y / 8.5) / 0.79 - 0.5) * 2.0;     // 동의 등마루 쪽이 밝다
+        vec3 hv = GR_VINYL * (0.8 + 0.3 * ridge);
+        float vis = 1.0 - smoothstep(1.5, 5.0, pw);
+        crop = mix(mix(GR_VINYL * 0.85, GR_SOIL, 0.18), mix(GR_SOIL, hv, house), vis);
+      }
+      // 둑 — 폭 0.9 m, 풀빛으로 연하게. 픽셀보다 가늘어지면 면적 비율로 섞는다
+      float dike = 1.0 - smoothstep(0.45 - pw * 0.5, 0.45 + pw * 0.5, dikeD);
+      crop = mix(crop, mix(crop, GR_DIKE, 0.6), mix(dike, 0.03, smoothstep(1.0, 3.0, pw)));
+      // 농로 — 블록 경계, 블록 셋 중 둘
+      float road = (1.0 - smoothstep(2.2 - pw * 0.5, 2.2 + pw * 0.5, roadD)) * step(0.33, block);
+      crop = mix(crop, GR_ROAD, mix(road, 0.03, smoothstep(3.0, 8.0, pw)));
+      field = mix(field, crop, parcelVis);
+      frough = mix(frough, vinyl ? 0.45 : 0.88, parcelVis);
+    }
+    col = mix(col, field, wField);
+    rgh = mix(rgh, frough, wField);
+  }
+
+  // ---- 마을
+  if (wVillage > 0.001) {
+    vec3 village = mix(GR_YARD, GR_BROAD, 0.45);   // 먼 마을의 평균 — 지붕·마당·집 사이 나무
+    float vilVis = 1.0 - smoothstep(1.5, 5.0, pw);
+    if (vilVis > 0.001) {
+      vec4 hv = grVillage(xz);
+      village = mix(village, mix(GR_YARD, hv.rgb, hv.a), vilVis);
+    }
+    col = mix(col, village, wVillage);
+    rgh = mix(rgh, 0.8, wVillage);
+  }
+
+  // ---- 암반·해안 바위
+  if (wRock > 0.001) {
+    vec3 rock = GR_ROCK * (0.7 + 0.6 * mix(fbm3(vec3(xz * (1.0 / 9.0), elev * 0.2)), 0.44,
+                                            smoothstep(3.0, 9.0, pw)));
+    col = mix(col, rock, wRock);
+    rgh = mix(rgh, 0.85, wRock);
+  }
+  col = mix(col, GR_ROCK * 0.55, wShore);
+  rgh = mix(rgh, 0.6, wShore);
+
+  // ---- 갯벌 — 갯골은 가는 물길, 낮을수록 젖었다
+  float wetness = 0.0;
+  if (wWet > 0.001) {
+    float chn = abs(fbm2(xz * (1.0 / 170.0), 3));
+    float channel = (1.0 - smoothstep(0.015, 0.045 + pw * 0.001, chn)) * (1.0 - smoothstep(20.0, 60.0, pw));
+    vec3 mud = mix(GR_MUD_WET, GR_MUD_DRY,
+                   clamp(smoothstep(0.8, 4.0, elev) * 0.8 + (nB - 0.44) * 0.6, 0.0, 1.0));
+    mud = mix(mud, GR_MUD_WET * 0.55, channel);
+    wetness = clamp(0.6 + channel * 0.4 - smoothstep(1.0, 4.0, elev) * 0.5, 0.0, 1.0);
+    col = mix(col, mud, wWet);
+    rgh = mix(rgh, mix(0.85, 0.22, wetness), wWet);
+  }
+
+  // ---- 미세 기복 — 30 m 격자가 못 싣는 굴곡(42 m·12 m 두 옥타브). 들·갯벌·마을은 평평하다
+  vec2 micro = vec2(0.0);
+  float mf1 = 1.0 - smoothstep(8.0, 20.0, pw);
+  if (mf1 > 0.001) micro += gnoise2(xz * (1.0 / 42.0)).yz * (3.0 / 42.0) * mf1;
+  float mf2 = 1.0 - smoothstep(2.5, 6.0, pw);
+  if (mf2 > 0.001) micro += gnoise2(xz * (1.0 / 12.0) + 5.0).yz * (0.9 / 12.0) * mf2;
+
+  // ---- 비행장 — 착륙대 풀밭, 포장면·과주로, 도색. 자리와 덮임은 shaders/runway.ts(게임 지형과 한 벌)이고, 여기는
+  // 실사의 결이다 — 깎은 풀 결·마른 자리, 타이어 자국, 아스팔트 결, 닳은 도색. 활주로는 결과의 것, 폭은 시험장
+  // 제원(core/runway.ts): 폭을 모르면 uRunwayOn이 0이고 아무것도 칠하지 않는다(포장면을 지어내지 않는다).
+  float field0 = 0.0;
+  if (uRunwayOn > 0.5) {
+    vec4 ax = grRunwayAxes(p, dxy);
+    vec4 af = grAirfield(ax);   // 층마다 몫 — 안쪽 층은 바깥 층의 몫만 바꾼다(shaders/runway.ts grAirfield)
+    field0 = af.x;
+    if (field0 > 0.001) {
+      float along = ax.x;
+      float across = ax.y;
+      float pa = ax.z;
+      float pc = ax.w;
+      float L = uRunway.z;
+      vec2 ne = vec2(-p.z, p.x);   // 렌더 x = e, z = -n
+      // 깎은 풀 — 깎는 기계가 오간 결(활주로와 나란히 5 m씩 번갈아 밝고 어둡다)과 마른 자리 얼룩
+      float mow = (smoothstep(-0.25, 0.25, sin(across * (6.2832 / 10.0))) - 0.5) * 0.10
+                * (1.0 - smoothstep(1.5, 4.0, pc));
+      float dry = pw < 20.0 ? mix(fbm3(vec3(ne * (1.0 / 23.0), 9.1)), 0.44, smoothstep(8.0, 20.0, pw)) : 0.44;
+      vec3 grass = mix(GR_GRASS, GR_GRASS_DRY, smoothstep(0.40, 0.62, dry + (nB - 0.44) * 0.5))
+                 * (0.94 + 0.12 * nB + mow);
+      col = mix(col, grass, field0);
+      rgh = mix(rgh, 0.9, field0);
+      // 포장면 — 활주로와 양 끝 과주로. 접지대(시단에서 100~450 m)에 타이어 자국, 과주로는 덜 다녀 바랬다
+      float paved = af.y;
+      float onRunway = grBand(along - 0.5 * L, 0.5 * L, pa);
+      float tz = smoothstep(80.0, 160.0, along) * (1.0 - smoothstep(380.0, 480.0, along))
+               + smoothstep(80.0, 160.0, L - along) * (1.0 - smoothstep(380.0, 480.0, L - along));
+      float rubber = tz * (1.0 - smoothstep(4.0, 9.0, abs(across)));
+      float tex = mix(fbm3(vec3(ne * 0.5, 2.0)) - 0.44, 0.0, smoothstep(1.0, 4.0, pw));
+      vec3 asph = GR_ASPHALT * (1.0 + 0.25 * tex) * (1.0 - 0.35 * rubber) * mix(1.12, 1.0, onRunway);
+      col += paved * (asph - grass);
+      rgh += paved * (0.75 - 0.9);
+      if (paved > 0.001) {
+        // 도색 — 흰색(af.z)·노란 갈매기표(af.w)는 포장면의 몫만 바꾼다. 포장면 덮임을 한 번 더 곱하면 가장자리에 붙은
+        // 측면 표지가 두 번 걸러져 멀리서 어둡고 깜빡였다(v1.94 리뷰 실측)
+        float wear = 0.80 + 0.20 * clamp(1.0 + 2.0 * tex, 0.0, 1.0);   // 닳은 도색 — 아스팔트 결이 비친다
+        col += af.z * (GR_PAINT * wear * (1.0 - 0.45 * rubber) - asph) + af.w * (GR_PAINT_YEL * wear - asph);
+        rgh += (af.z + af.w) * (0.62 - 0.75);
+      }
+    }
+  }
+
+  float bare = (1.0 - wField) * (1.0 - wWet) * (1.0 - wVillage) * (1.0 - field0);
+  float fShare = bare * (1.0 - wRock) * (1.0 - wShore);
+  albedo = col;
+  rough = rgh;
+  grad = forestGrad * fShare + micro * bare;
+  wet = wWet * wetness * (1.0 - field0);
+  occ = mix(1.0, forestOcc, fShare);
+}
+
+/** 촘촘한 티어가 덮으면 그것, 아니면 넓은 티어, 둘 다 밖이면 해수면. */
+float grTerrainH(vec2 xz) {
+  vec2 en = vec2(xz.x, -xz.y);   // 렌더 x = e, z = -n (scene/axes.ts)
+  vec2 uv = ((en - uHFine.xy) / uHFine.z + 0.5) / uHFineSize;
+  if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) return textureLod(uHeightFine, uv, 0.0).r;
+  uv = ((en - uHCoarse.xy) / uHCoarse.z + 0.5) / uHCoarseSize;
+  if (uv.x > 0.0 && uv.y > 0.0 && uv.x < 1.0 && uv.y < 1.0) return textureLod(uHeightCoarse, uv, 0.0).r;
+  return 0.0;
+}
+
+/** 지형 자체 그림자 0(그늘) ~ 1(햇빛) — 머리말 「지형 자체 그림자」. p는 표면에서 조금 띄운 점.
+ *  pw(픽셀 발자국)가 크면 — 먼 땅이면 — 걸음을 성기게 한다: 30걸음·1.22배 대신 16걸음·1.42배로
+ *  같은 약 5.8 km를 덮는다. 먼 산그늘은 넓어서 성긴 걸음으로도 잡히고, 화면 픽셀 대부분이 거기다. */
+float grTerrainShadow(vec3 p, vec3 L, float pw) {
+  if (uHeightOn < 0.5) return 1.0;
+  if (L.y <= 0.0) return 0.0;
+  bool far = pw > 8.0;
+  int steps = far ? 16 : 30;
+  float grow = far ? 1.42 : 1.22;
+  float res = 1.0;
+  float t = 18.0;
+  for (int i = 0; i < 30; i++) {
+    if (i >= steps) break;
+    vec3 q = p + L * t;
+    if (q.y > uTerrainTop + 2.0) break;
+    res = min(res, (q.y - grTerrainH(q.xz)) / (t * 0.03));
+    if (res < -0.5) break;
+    t *= grow;
+  }
+  res = clamp(res, 0.0, 1.0);
+  return res * res * (3.0 - 2.0 * res);
+}
+`
+);
+const GROUND_FRAG_BODY = (
+  /* glsl */
+  `
+  vec2 grGrad = vec2(0.0);
+  float grWet = 0.0;
+  float grOcc = 1.0;
+  // 픽셀 발자국 [m] — 화면 도함수는 **분기와 discard 앞에서 한 번만** 잰다. 갈라진 분기 안이나
+  // discard 뒤의 도함수는 GLSL에서 정의되지 않는다(조명 단계의 그림자 걸음 수도 이 값을 쓴다).
+  // dFdx·dFdy 한 쌍에서 등방 발자국(= fwidth의 길이)을 셈하고, 활주로 도색은 축마다 따로 잰다(grCover의 dxy)
+  vec3 grDx = dFdx(vGroundWorld);
+  vec3 grDy = dFdy(vGroundWorld);
+  float grPw = max(length(abs(grDx) + abs(grDy)), 1.0e-3);
+  {
+    vec3 gp = vGroundWorld;
+    vec3 gn = normalize(vGroundNormal);
+    float pw = grPw;
+    vec2 coast = coastAt(gp.xz);
+    // 물가의 해수면 높이 조각은 버린다 — 해면이 그 자리를 그린다. 지형은 바다 칸을 **칸 단위로**
+    // 빼므로(scene/terrain.ts) 남은 해안 칸이 30 m 계단으로 바다에 걸쳐 해안선이 톱니가 됐다.
+    // 해수면에 붙은 조각을 버리면 해안선이 삼각형 안의 0.35 m 등고선이 된다. 바다에서 60 m 넘게
+    // 떨어진 0 m 땅(활주로가 있는 간척지)은 거리장이 막는다.
+    if (gp.y < 0.35 && uHasCoast > 0.5 && coast.y > 0.5 && coast.x > -60.0) discard;
+    // 뭍에서 바다까지 [m] — 거리장은 바다 쪽이 양수다. 모르면(자료 없음) 바다와 먼 것으로 친다
+    float shoreD = (uHasCoast > 0.5 && coast.y > 0.5) ? max(-coast.x, 0.0) : 1.0e4;
+    vec3 albedo;
+    float rough;
+    grCover(gp, gn, vGroundShade, shoreD, pw, vec4(grDx.xz, grDy.xz), albedo, rough, grGrad, grWet, grOcc);
+    diffuseColor.rgb = albedo;
+    roughnessFactor = rough;
+  }
+`
+);
+const GROUND_NORMAL_BODY = (
+  /* glsl */
+  `
+  vec3 grNw = normalize(normalize(vGroundNormal) + vec3(-grGrad.x, 0.0, -grGrad.y));
+  normal = normalize((viewMatrix * vec4(grNw, 0.0)).xyz);
+`
+);
+const GROUND_LIGHT_BODY = (
+  /* glsl */
+  `
+  {
+    vec3 L = uSunDirWorld;
+    vec3 gn = normalize(vGroundNormal);
+    float sunVis = cloudSunTransmit(vGroundWorld, L);
+    // 해를 등진 면은 어차피 직사광이 0이다 — 그림자 광선을 쏠 이유가 없다
+    if (dot(gn, L) > -0.02) sunVis *= grTerrainShadow(vGroundWorld + gn * 2.0, L, grPw);
+    reflectedLight.directDiffuse *= sunVis;
+    reflectedLight.directSpecular *= sunVis;
+    reflectedLight.indirectDiffuse *= vGroundShade.x * grOcc;
+    // 젖은 갯벌은 하늘을 비춘다 — 물의 프레넬(F0 0.02), 하늘과 같은 산란 함수
+    if (grWet > 0.001) {
+      vec3 V = normalize(cameraPosition - vGroundWorld);
+      float NoV = clamp(dot(grNw, V), 0.0, 1.0);
+      float F = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);
+      vec3 R = reflect(-V, grNw);
+      R.y = max(R.y, 0.01);
+      reflectedLight.indirectSpecular += grWet * F * skyRadiance(R, uSunDirWorld, uSunIntensity, uHaze);
+    }
+  }
+`
+);
+const CELL = { LAND: 0, SEA: 1, MISSING: 2 };
+function seaLevelRaw(tier) {
+  if (!(tier.scale > 0)) return null;
+  const v2 = (0 - tier.offset) / tier.scale;
+  const r2 = Math.round(v2);
+  return Math.abs(v2 - r2) < 1e-9 && r2 >= 0 && r2 <= 65535 ? r2 : null;
+}
+function atSeaLevel(tier, i, seaRaw) {
+  const v2 = tier.raw[i];
+  if (v2 === tier.nodata) return false;
+  if (seaRaw !== null) return v2 === seaRaw;
+  return Math.abs(tier.offset + v2 * tier.scale) < tier.scale * 0.5;
+}
+function cellToNed(tier, r2, c) {
+  return [tier.n0 + r2 * tier.step, tier.e0 + c * tier.step];
+}
+function nedToCell(tier, n2, e) {
+  const r2 = Math.round((n2 - tier.n0) / tier.step);
+  const c = Math.round((e - tier.e0) / tier.step);
+  if (r2 < 0 || c < 0 || r2 >= tier.rows || c >= tier.cols) return null;
+  return [r2, c];
+}
+function floodTier(tier, extraSeeds) {
+  const { rows, cols } = tier;
+  const n2 = rows * cols;
+  const cells = new Uint8Array(n2);
+  const seaRaw = seaLevelRaw(tier);
+  let missingCells = 0;
+  const isSeaLevel = new Uint8Array(n2);
+  for (let i = 0; i < n2; i++) {
+    if (tier.raw[i] === tier.nodata) {
+      cells[i] = CELL.MISSING;
+      missingCells++;
+    } else if (atSeaLevel(tier, i, seaRaw)) {
+      isSeaLevel[i] = 1;
+    }
+  }
+  const queue = new Int32Array(n2);
+  let head = 0;
+  let tail = 0;
+  const push = (i) => {
+    if (isSeaLevel[i] === 1 && cells[i] !== CELL.SEA) {
+      cells[i] = CELL.SEA;
+      queue[tail++] = i;
+    }
+  };
+  for (let c = 0; c < cols; c++) {
+    push(c);
+    push((rows - 1) * cols + c);
+  }
+  for (let r2 = 0; r2 < rows; r2++) {
+    push(r2 * cols);
+    push(r2 * cols + cols - 1);
+  }
+  if (extraSeeds) {
+    for (let r2 = 0; r2 < rows; r2++) {
+      for (let c = 0; c < cols; c++) {
+        if (extraSeeds(r2, c)) push(r2 * cols + c);
+      }
+    }
+  }
+  while (head < tail) {
+    const i = queue[head++];
+    const r2 = i / cols | 0;
+    const c = i - r2 * cols;
+    if (r2 > 0) push(i - cols);
+    if (r2 + 1 < rows) push(i + cols);
+    if (c > 0) push(i - 1);
+    if (c + 1 < cols) push(i + 1);
+  }
+  let seaCells = 0;
+  let landAtSeaLevel = 0;
+  for (let i = 0; i < n2; i++) {
+    if (cells[i] === CELL.SEA) seaCells++;
+    else if (isSeaLevel[i] === 1) landAtSeaLevel++;
+  }
+  return { name: tier.name, rows, cols, cells, seaCells, landAtSeaLevel, missingCells, shelfCells: 0 };
+}
+const SHELF = {
+  /** 이 표고 [m] 이하의 뭍만 본다 */
+  maxElevM: 2.5,
+  /** 둘레 창의 반경 [칸] — 7×7 */
+  radiusCells: 3,
+  /** 창 안 바다 비율이 이 이상이면 바다 */
+  seaFrac: 0.35,
+  /** 규칙 1을 되풀이하는 횟수 — 넓은 저지대를 이만큼만 깎는다 */
+  passes: 2,
+  /** 규칙 2의 덩어리 넓이 상한 [m²] */
+  maxBlobM2: 36e4
+};
+function absorbShelves(tier, flooded) {
+  const { rows, cols } = tier;
+  const n2 = rows * cols;
+  const cells = flooded.cells.slice();
+  const elev = new Float32Array(n2);
+  for (let i = 0; i < n2; i++) {
+    const v2 = tier.raw[i];
+    elev[i] = v2 === tier.nodata ? Number.NaN : tier.offset + v2 * tier.scale;
+  }
+  const low = (i) => cells[i] === CELL.LAND && elev[i] <= SHELF.maxElevM;
+  const w2 = cols + 1;
+  const sat = new Int32Array((rows + 1) * w2);
+  const R2 = SHELF.radiusCells;
+  for (let pass = 0; pass < SHELF.passes; pass++) {
+    for (let r2 = 0; r2 < rows; r2++) {
+      let rowSum = 0;
+      for (let c = 0; c < cols; c++) {
+        rowSum += cells[r2 * cols + c] === CELL.SEA ? 1 : 0;
+        sat[(r2 + 1) * w2 + c + 1] = sat[r2 * w2 + c + 1] + rowSum;
+      }
+    }
+    const flip = [];
+    for (let r2 = 0; r2 < rows; r2++) {
+      const r0 = Math.max(r2 - R2, 0);
+      const r1 = Math.min(r2 + R2, rows - 1) + 1;
+      for (let c = 0; c < cols; c++) {
+        const i = r2 * cols + c;
+        if (!low(i)) continue;
+        const c0 = Math.max(c - R2, 0);
+        const c1 = Math.min(c + R2, cols - 1) + 1;
+        const sea = sat[r1 * w2 + c1] - sat[r0 * w2 + c1] - sat[r1 * w2 + c0] + sat[r0 * w2 + c0];
+        if (sea >= SHELF.seaFrac * (r1 - r0) * (c1 - c0)) flip.push(i);
+      }
+    }
+    if (flip.length === 0) break;
+    for (const i of flip) cells[i] = CELL.SEA;
+  }
+  const maxCells = SHELF.maxBlobM2 / (tier.step * tier.step);
+  const seen = new Uint8Array(n2);
+  const stack = new Int32Array(n2);
+  const members = [];
+  for (let s = 0; s < n2; s++) {
+    if (seen[s] || cells[s] !== CELL.LAND) continue;
+    let top = 0;
+    let peak = -Infinity;
+    members.length = 0;
+    stack[top++] = s;
+    seen[s] = 1;
+    while (top > 0) {
+      const i = stack[--top];
+      members.push(i);
+      if (elev[i] > peak) peak = elev[i];
+      const r2 = i / cols | 0;
+      const c = i - r2 * cols;
+      for (const j of [
+        r2 > 0 ? i - cols : -1,
+        r2 + 1 < rows ? i + cols : -1,
+        c > 0 ? i - 1 : -1,
+        c + 1 < cols ? i + 1 : -1
+      ]) {
+        if (j >= 0 && !seen[j] && cells[j] === CELL.LAND) {
+          seen[j] = 1;
+          stack[top++] = j;
+        }
+      }
+    }
+    if (members.length < maxCells && peak <= SHELF.maxElevM) {
+      for (const i of members) cells[i] = CELL.SEA;
+    }
+  }
+  let seaCells = 0;
+  let landAtSeaLevel = 0;
+  const seaRaw = seaLevelRaw(tier);
+  for (let i = 0; i < n2; i++) {
+    if (cells[i] === CELL.SEA) seaCells++;
+    else if (cells[i] === CELL.LAND && atSeaLevel(tier, i, seaRaw)) landAtSeaLevel++;
+  }
+  return {
+    ...flooded,
+    cells,
+    seaCells,
+    landAtSeaLevel,
+    shelfCells: seaCells - flooded.seaCells
+  };
+}
+function extentOf(t2) {
+  return Math.max(t2.rows * t2.step, t2.cols * t2.step);
+}
+function buildSeaMasks(tiers) {
+  const order = [...tiers].sort((a, b) => extentOf(b) - extentOf(a));
+  const out = /* @__PURE__ */ new Map();
+  const done = [];
+  for (const tier of order) {
+    const seeds = done.length === 0 ? null : (r2, c) => {
+      const [n2, e] = cellToNed(tier, r2, c);
+      for (const prev of done) {
+        const idx = nedToCell(prev.tier, n2, e);
+        if (idx && prev.mask.cells[idx[0] * prev.mask.cols + idx[1]] === CELL.SEA) return true;
+      }
+      return false;
+    };
+    const mask = floodTier(tier, seeds);
+    out.set(tier.name, mask);
+    done.push({ tier, mask });
+  }
+  for (const { tier, mask } of done) out.set(tier.name, absorbShelves(tier, mask));
+  return out;
+}
+function edt1d(f2, n2, d, v2, z2) {
+  let k2 = 0;
+  v2[0] = 0;
+  z2[0] = -Infinity;
+  z2[1] = Infinity;
+  for (let q2 = 1; q2 < n2; q2++) {
+    let s = (f2[q2] + q2 * q2 - (f2[v2[k2]] + v2[k2] * v2[k2])) / (2 * q2 - 2 * v2[k2]);
+    while (s <= z2[k2]) {
+      k2--;
+      s = (f2[q2] + q2 * q2 - (f2[v2[k2]] + v2[k2] * v2[k2])) / (2 * q2 - 2 * v2[k2]);
+    }
+    k2++;
+    v2[k2] = q2;
+    z2[k2] = s;
+    z2[k2 + 1] = Infinity;
+  }
+  k2 = 0;
+  for (let q2 = 0; q2 < n2; q2++) {
+    while (z2[k2 + 1] < q2) k2++;
+    const dq = q2 - v2[k2];
+    d[q2] = dq * dq + f2[v2[k2]];
+  }
+}
+function squaredDistanceTransform(seed, w2, h) {
+  const INF = 1e20;
+  const out = new Float64Array(w2 * h);
+  for (let i = 0; i < w2 * h; i++) out[i] = seed[i] === 0 ? 0 : INF;
+  const n2 = Math.max(w2, h);
+  const f2 = new Float64Array(n2);
+  const d = new Float64Array(n2);
+  const v2 = new Int32Array(n2);
+  const z2 = new Float64Array(n2 + 1);
+  for (let x2 = 0; x2 < w2; x2++) {
+    for (let y2 = 0; y2 < h; y2++) f2[y2] = out[y2 * w2 + x2];
+    edt1d(f2, h, d, v2, z2);
+    for (let y2 = 0; y2 < h; y2++) out[y2 * w2 + x2] = d[y2];
+  }
+  for (let y2 = 0; y2 < h; y2++) {
+    const row = y2 * w2;
+    for (let x2 = 0; x2 < w2; x2++) f2[x2] = out[row + x2];
+    edt1d(f2, w2, d, v2, z2);
+    for (let x2 = 0; x2 < w2; x2++) out[row + x2] = d[x2];
+  }
+  return out;
+}
+function domainOf(tiers) {
+  let n0 = Infinity;
+  let e0 = Infinity;
+  let n1 = -Infinity;
+  let e1 = -Infinity;
+  for (const { tier } of tiers) {
+    n0 = Math.min(n0, tier.n0);
+    e0 = Math.min(e0, tier.e0);
+    n1 = Math.max(n1, tier.n0 + (tier.rows - 1) * tier.step);
+    e1 = Math.max(e1, tier.e0 + (tier.cols - 1) * tier.step);
+  }
+  return { n0, e0, nSpan: Math.max(n1 - n0, 1), eSpan: Math.max(e1 - e0, 1) };
+}
+function buildCoastField(tiers, size = 1536) {
+  const fine = [...tiers].sort((a, b) => a.tier.step - b.tier.step);
+  const dom = domainOf(fine.length > 0 ? fine : tiers);
+  const w2 = size;
+  const h = size;
+  const seaSeed = new Float64Array(w2 * h);
+  const landSeed = new Float64Array(w2 * h);
+  const known = new Uint8Array(w2 * h);
+  const isSea = new Uint8Array(w2 * h);
+  for (let r2 = 0; r2 < h; r2++) {
+    const n2 = dom.n0 + dom.nSpan * r2 / (h - 1);
+    for (let c = 0; c < w2; c++) {
+      const e = dom.e0 + dom.eSpan * c / (w2 - 1);
+      const i = r2 * w2 + c;
+      let cell = null;
+      for (const { tier, mask } of fine) {
+        const idx = nedToCell(tier, n2, e);
+        if (idx) {
+          cell = mask.cells[idx[0] * mask.cols + idx[1]];
+          break;
+        }
+      }
+      if (cell === null) cell = CELL.SEA;
+      if (cell === CELL.MISSING) {
+        seaSeed[i] = 1;
+        landSeed[i] = 1;
+        continue;
+      }
+      known[i] = 1;
+      if (cell === CELL.SEA) {
+        isSea[i] = 1;
+        seaSeed[i] = 0;
+        landSeed[i] = 1;
+      } else {
+        seaSeed[i] = 1;
+        landSeed[i] = 0;
+      }
+    }
+  }
+  const toSea = squaredDistanceTransform(seaSeed, w2, h);
+  const toLand = squaredDistanceTransform(landSeed, w2, h);
+  const mpc = Math.min(dom.eSpan / (w2 - 1), dom.nSpan / (h - 1));
+  const dist = new Float32Array(w2 * h);
+  for (let i = 0; i < w2 * h; i++) {
+    dist[i] = isSea[i] === 1 ? Math.sqrt(toLand[i]) * mpc : -Math.sqrt(toSea[i]) * mpc;
+  }
+  return { size, n0: dom.n0, e0: dom.e0, nSpan: dom.nSpan, eSpan: dom.eSpan, dist, known, metersPerCell: mpc };
+}
+const COAST_RANGE_M = 1500;
+function encodeCoastField(f2) {
+  const out = new Uint8Array(f2.size * f2.size * 2);
+  for (let i = 0; i < f2.size * f2.size; i++) {
+    const t2 = Math.max(-1, Math.min(1, f2.dist[i] / COAST_RANGE_M)) * 0.5 + 0.5;
+    out[2 * i] = Math.round(t2 * 255);
+    out[2 * i + 1] = f2.known[i] === 1 ? 255 : 0;
+  }
+  return out;
+}
+const COAST_GLSL = (
+  /* glsl */
+  `
+#ifndef COAST_GLSL_G
+#define COAST_GLSL_G
+uniform sampler2D uCoast;
+uniform vec2 uCoastMin;      // (e0, n0) [m]
+uniform vec2 uCoastInvSpan;  // 1/(eSpan, nSpan)
+// 0이면 거리장이 없다. 그때 해면은 scene/ocean.ts가 통째로 숨기므로 이 갈래는 보수적
+// 기본값일 뿐이다 — 지형을 모르면 해안선도 모른다.
+uniform float uHasCoast;
+
+/** 월드 (x, z) → (해안거리 [m], known). 도메인 밖은 열린 바다. */
+vec2 coastAt(vec2 worldXZ) {
+  if (uHasCoast < 0.5) return vec2(${COAST_RANGE_M}.0, 1.0);
+  // 렌더 좌표 x = e, z = −n (scene/axes.ts — 주석 안에서 백틱은 리터럴을 끊는다).
+  vec2 uv = (vec2(worldXZ.x, -worldXZ.y) - uCoastMin) * uCoastInvSpan;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+    return vec2(${COAST_RANGE_M}.0, 1.0);
+  }
+  vec2 t = textureLod(uCoast, uv, 0.0).rg;
+  return vec2((t.r * 2.0 - 1.0) * ${COAST_RANGE_M}.0, t.g);
+}
+#endif
+`
+);
+const OCEAN_VERT = (
+  /* glsl */
+  `
+${COAST_GLSL}
+uniform mat4 uGridInvViewProj;
+uniform vec3 uCamPos;
+uniform float uMaxDist;
+uniform float uTime;
+uniform vec2 uGridAngle;       // (세로 한 줄, 가로 한 칸)이 덮는 화각 [rad]
+uniform float uShoreFade;      // 이 거리 안쪽에서 파고가 0으로 잦아든다 [m]
+uniform vec4 uWave[${WAVE_COUNT}];    // dir.x, dir.z, 진폭 A, 파수 k
+uniform vec2 uWaveQ[${WAVE_COUNT}];   // 가파름 Q, 각주파수 ω
+
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying float vDist;
+varying vec2 vCoast;   // (해안거리 [m], known)
+
+/** NDC 한 점 → 해수면 위의 밑점. */
+vec3 seaBase(vec2 ndc) {
+  vec4 a = uGridInvViewProj * vec4(ndc, -1.0, 1.0);
+  vec4 b = uGridInvViewProj * vec4(ndc,  1.0, 1.0);
+  vec3 dir = normalize(b.xyz / b.w - a.xyz / a.w);
+  // 카메라가 해수면 아래면 광선이 뒤로 간다 — 물 밑은 이 모델의 밖이라 위로 붙여 둔다.
+  float h = max(uCamPos.y, 0.05);
+  // 아래로 향하는 광선만 평면과 만난다. 지평선 위쪽은 최대 거리로 밀어 고리로 뭉친다
+  // (그 줄의 삼각형은 넓이가 0이 된다 — 버려지는 것이 맞다).
+  float t = (dir.y < -1.0e-4) ? min(h / -dir.y, uMaxDist) : uMaxDist;
+  vec3 p = uCamPos + dir * t;
+  return vec3(p.x, 0.0, p.z);
+}
+
+void main() {
+  vec3 base = seaBase(position.xy);
+  vDist = length(base.xz - uCamPos.xz);
+
+  // **격자가 못 푸는 파장은 그리지 않는다 (나이퀴스트).**
+  //
+  // 투영 격자의 칸은 **길쭉하다.** 시선 방향으로는 높이 h에서 거리 d일 때 d²·θ_v/h로
+  // 벌어지고(스치는 각일수록 급격히), 가로로는 d·θ_h로 훨씬 촘촘하다. 처음에 시선
+  // 방향만 보고 판정했더니 30 m 상공·300 m 앞에서 칸이 16 m로 잡혀 **20 m 파까지 접혔고
+  // 바다가 유리판이 됐다.** 방향이 정해지지 않은 2차원 파의 표본 밀도를 정하는 것은
+  // 면적이므로 두 간격의 기하평균을 쓴다.
+  //
+  // 고정 거리로 죽이는 것과 갈리는 곳은 고도다: 궤도 시점(20 km 상공)에서는 200 m 파도
+  // 못 풀고, 해면 근처에서는 10 m 파가 살아야 한다. 이 식은 그 둘을 함께 맞춘다.
+  float camH = max(uCamPos.y, 1.0);
+  float along = vDist * vDist * uGridAngle.x / camH;
+  float across = vDist * uGridAngle.y;
+  float cell = max(sqrt(along * across), 0.05);
+
+  // **해안에서 파고를 재운다.** 표고가 정확히 0 m인 땅이 16.5 km² 있어서(간척지·저지대),
+  // 재우지 않으면 파마루가 지형을 뚫고 올라온다 — 실측으로 본 그것이다.
+  // 얕은 곳에서 파도가 부서져 잦아드는 것과 같은 방향이라 물리적으로도 어긋나지 않는다.
+  vCoast = coastAt(base.xz);
+  float shore = smoothstep(0.0, uShoreFade, vCoast.x);
+
+  vec3 disp = vec3(0.0);
+  vec3 n = vec3(0.0, 1.0, 0.0);
+  for (int i = 0; i < ${WAVE_COUNT}; i++) {
+    vec2 d = uWave[i].xy;
+    float k = uWave[i].w;
+    // 파장이 두 칸보다 짧아지면(k·cell > π) 진폭을 0으로 접는다. 잃은 기울기는
+    // 프래그먼트의 거칠기가 통계로 받는다 — 그래서 멀리서도 윤슬이 회색으로 안 죽는다.
+    float nyq = 1.0 - smoothstep(1.4, 3.14159265, k * cell);
+    float A = uWave[i].z * nyq * shore;
+    float Q = uWaveQ[i].x;
+    float w = uWaveQ[i].y;
+    float ph = k * dot(d, base.xz) - w * uTime;
+    float S = sin(ph);
+    float C = cos(ph);
+    disp.x += Q * A * d.x * C;
+    disp.z += Q * A * d.y * C;
+    disp.y += A * S;
+    // GPU Gems 1 §1의 해석 법선 — 변위와 같은 항에서 나오므로 따로 어긋나지 않는다.
+    n.x -= d.x * k * A * C;
+    n.z -= d.y * k * A * C;
+    n.y -= Q * k * A * S;
+  }
+
+  vWorld = base + disp;
+  vNormal = normalize(n);
+  // **투영만 패스별 행렬로 한다.** 위치는 uGridInvViewProj에서 나왔으므로 두 패스가 같다.
+  gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.0);
+}
+`
+);
+const OCEAN_FRAG = (
+  /* glsl */
+  `
+uniform vec3 uCamPos;
+uniform float uRoughness;      // √(콕스-먼크 σ²)
+uniform float uWaveHeight;     // 유의파고 [m] — 마루를 밝히는 데 쓴다
+uniform vec3 uDeepColor;
+uniform vec3 uScatterColor;
+uniform vec3 uShallowColor;
+uniform float uGlitterGain;
+uniform float uFoamAmount;
+uniform float uSpecAA;         // 법선 분산 → 거칠기 변환 계수
+uniform float uRipple;         // 잔물결 기울기 세기 — 풍속에서 나온다
+uniform vec2 uWindDir;         // 바람이 가는 방향 (렌더 x·z 평면 단위벡터)
+uniform float uTime;
+
+/** 잔물결의 기울기 (∂y/∂x, ∂y/∂z).
+ *
+ *  격자가 못 푸는 4 m 아래 파다. 정점을 못 움직이므로 **법선만** 흔든다.
+ *
+ *  **사인 합에서 노이즈로 바꿨다.** 처음에는 방향이 다른 사인 넷을 더했는데, 방향을
+ *  아무리 흩고 위상을 휘어도 간섭이 규칙적인 짜임을 만들었다(실측 — 근거리 해면이
+ *  모눈종이처럼 보였다). 사인 합은 주기적이므로 피할 수 없는 성질이다.
+ *
+ *  **옥타브마다 픽셀 발자국으로 접는다.** px는 이 픽셀이 덮는 세계 거리다. 파장이 그보다
+ *  짧아지면 그리는 순간 에일리어싱이고, 거리로 한꺼번에 접으면 가까운 큰 잔물결까지
+ *  같이 죽는다. 접은 몫의 기울기 분산은 lostVar로 내보내 **거칠기가 이어받는다** —
+ *  에너지가 사라지지 않으므로 멀어져도 윤슬이 회색으로 죽지 않는다.
+ *
+ *  흐름은 바람 방향으로 밀어 준다. 심해 분산관계를 이 규모까지 끌고 가지는 않았다 —
+ *  1 m 이하는 표면장력이 지배해 식이 달라지고, 화면에서 구별되지 않는다. 표시용이다. */
+vec2 rippleSlope(vec2 p, vec2 windDir, float t, float px, out float lostVar) {
+  vec2 g = vec2(0.0);
+  lostVar = 0.0;
+  float L = 4.3;
+  // 기울기 진폭. 네 옥타브를 합친 RMS 기울기가 0.1 안팎이 되도록 잡았다 — 풍속 9 m/s의
+  // 콕스-먼크 전체 경사 RMS가 0.22이므로 절반쯤을 기하로 들고 나머지는 거칠기가 받는다.
+  float amp = 0.16;
+  for (int i = 0; i < 4; i++) {
+    // 파장이 픽셀의 1.3배 아래로 내려가면 다 접힌다.
+    float lod = 1.0 - smoothstep(0.55, 1.3, px / L);
+    vec2 q = (p - windDir * (t * (0.9 + 0.55 * float(i)))) / L;
+    vec2 d = gnoise2(q).yz / L;
+    g += d * (amp * L * lod);
+    // 옥타브 하나의 기울기 분산 어림 — 접힌 몫만 거칠기로 넘긴다.
+    float dropped = amp * (1.0 - lod);
+    lostVar += 0.5 * dropped * dropped;
+    L *= 0.47;
+    amp *= 0.8;
+  }
+  return g;
+}
+
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying float vDist;
+varying vec2 vCoast;
+
+/** GGX 법선분포 — α는 콕스-먼크 경사분산의 제곱근이다(베크만 경사분산 = α²). */
+float ggxD(float NoH, float a2) {
+  float d = NoH * NoH * (a2 - 1.0) + 1.0;
+  return a2 / (3.14159265 * d * d);
+}
+
+/** 스미스 높이상관 가시성항 — 분모의 4·NoL·NoV까지 품는다. */
+float ggxV(float NoV, float NoL, float a2) {
+  float gv = NoL * sqrt(NoV * NoV * (1.0 - a2) + a2);
+  float gl = NoV * sqrt(NoL * NoL * (1.0 - a2) + a2);
+  return 0.5 / max(gv + gl, 1.0e-5);
+}
+
+void main() {
+  // **뭍 위에는 해면이 없다.** 자료가 없는 칸도 마찬가지다 — 지형 구멍으로 바다가 비치면
+  // 그건 구멍이 아니라 호수로 읽힌다(core/coastfield.ts). 문턱을 뭍 쪽으로 120 m 밀어
+  // 두는 이유는 거리장이 39 m/칸이라 해안선을 이 격자로 그릴 수 없기 때문이다.
+  if (vCoast.y < 0.5 || vCoast.x < -120.0) discard;
+
+  vec3 toEye = uCamPos - vWorld;
+  float dist = length(toEye);
+  vec3 V = toEye / max(dist, 1.0e-4);
+  // **기하 스페큘러 안티에일리어싱 — 게르스트너 법선에만 건다.**
+  //
+  // 한 픽셀 안에서 법선이 많이 흔들리면, 옳은 답은 그 흔들림 위에서 **평균 낸** 반사다.
+  // 법선 하나로 계산하면 픽셀마다 튀어 지글거리고, 밉맵처럼 법선을 뭉개기만 하면 이번엔
+  // 윤슬이 회색 죽으로 죽는다. 그래서 분산을 **거칠기로 옮긴다**(Kaplanyan/Tokuyoshi 계열).
+  //
+  // **잔물결을 더하기 전에 잰다.** 섞어서 재면 잔물결의 분산까지 "에일리어싱"으로 읽혀
+  // 해면이 통째로 눕는다 — 그렇게 만들어 보니 바다가 무늬 없는 판이 됐다. 잔물결은 이미
+  // 픽셀 발자국으로 대역제한돼 있어서 여기서 다시 벌줄 이유가 없다.
+  vec3 Ng = normalize(vNormal);
+  vec3 dNx = dFdx(Ng);
+  vec3 dNy = dFdy(Ng);
+  float varN = dot(dNx, dNx) + dot(dNy, dNy);
+  // 하늘 반사도 같은 이유로 튄다. 법선을 그만큼 눕혀 반사 방향을 안정시킨다.
+  vec3 N = normalize(mix(Ng, vec3(0.0, 1.0, 0.0), clamp(varN * uSpecAA * 0.6, 0.0, 0.6)));
+
+  // 잔물결 — 격자 아래 4 m 파를 법선으로만 되돌린다.
+  // px는 이 픽셀이 덮는 세계 거리. 스치는 각에서 커지므로 수평선 쪽이 저절로 접힌다.
+  float px = max(length(fwidth(vWorld.xz)), 1.0e-4);
+  float lostVar = 0.0;
+  vec2 g = rippleSlope(vWorld.xz, uWindDir, uTime, px, lostVar) * uRipple;
+  N = normalize(N + vec3(-g.x, 0.0, -g.y));
+
+  // 접힌 잔물결의 분산 + 기하 법선의 흔들림. 둘 다 거칠기가 이어받는다.
+  float widen = clamp(varN * uSpecAA + lostVar * uRipple * uRipple * 2.0, 0.0, 0.35);
+  // 스치는 각에서 먼 파도의 뒷면이 보일 수 있다. 뒤집힌 법선을 그대로 쓰면 검은 얼룩이
+  // 되므로 시선 쪽으로 눕힌다 — 표시용 완화다.
+  float NoV = dot(N, V);
+  if (NoV < 0.02) {
+    N = normalize(N + V * (0.02 - NoV) * 1.05);
+    NoV = max(dot(N, V), 0.02);
+  }
+
+  // 프레넬 — 물 n = 1.33 → F0 = ((1.33−1)/(1.33+1))² = 0.020
+  float F = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);
+
+  // 하늘 반사. 지평 아래로 반사되면(파도 뒷면) 지평선 값을 읽는다 —
+  // 실제로 그 방향에 있는 것도 먼바다와 수평선 안개다.
+  vec3 R = reflect(-V, N);
+  R.y = max(R.y, 0.01);
+  vec3 sky = skyRadiance(R, uSunDirWorld, uSunIntensity, uHaze);
+  // 구름도 비친다 — 하늘과 같은 함수를 거친 적분으로 부른다(scene/ocean.ts가 걸음 수를 정한다).
+  // 반사 광선은 수면에서 출발한다.
+  vec4 cl = cloudLayer(vWorld, R, uSunDirWorld, uSunIntensity, uHaze);
+  sky = sky * cl.a + cl.rgb;
+
+  // 물속에서 되나오는 빛 — 마루에서 밝다(빛이 얇은 곳을 지난다).
+  float lift = clamp(vWorld.y / max(uWaveHeight, 0.05) * 0.5 + 0.5, 0.0, 1.0);
+  // 얕은 물은 바닥에서 되비쳐 밝고 푸르다. **수심 자료가 없으므로 해안 거리를 대신 쓴다** —
+  // 표시용 대리값이다(terrarium 타일에 수심이 없다: core/seamask.ts).
+  vec3 deep = mix(uShallowColor, uDeepColor, smoothstep(0.0, 900.0, vCoast.x));
+  vec3 body = deep + uScatterColor * lift * max(uSunDirWorld.y, 0.0);
+
+  vec3 color = mix(body, sky, F);
+
+  // 태양 정반사 — 윤슬. 폭은 uRoughness가 정하고, 그 값은 풍속에서 나온다.
+  // 구름 그림자는 직사광에만 건다 — 하늘 반사(sky)는 구름 낀 하늘 자체가 이미 어둡다.
+  vec3 sunCol = sunThroughAtmosphere(uSunDirWorld, uSunIntensity, uHaze)
+              * cloudShadowAt(vWorld, uSunDirWorld);
+  vec3 L = uSunDirWorld;
+  float NoL = max(dot(N, L), 0.0);
+  if (NoL > 0.0) {
+    vec3 H = normalize(L + V);
+    float NoH = max(dot(N, H), 0.0);
+    float a2 = clamp(uRoughness * uRoughness + widen, 1.0e-5, 1.0);
+    color += ggxD(NoH, a2) * ggxV(NoV, NoL, a2) * F * NoL * sunCol * uGlitterGain;
+  }
+
+  // 포말 — 마루와 해안선. 흰 거품은 거의 램버시안이라 하늘빛을 고루 받는다.
+  float crest = smoothstep(0.62, 0.95, lift) * uFoamAmount;
+  float surf = (1.0 - smoothstep(0.0, 90.0, vCoast.x)) * step(0.0, vCoast.x);
+  // 해안마다 똑같이 두르면 모든 섬이 흰 테두리를 쓴 그림이 된다(화면 실측) — 부서지는 파도는
+  // 곳에 따라 있다 없다 한다. 1 km 규모로 들쭉날쭉하게, 파고가 낮으면 잦아들게 한다(표시 값).
+  surf *= smoothstep(0.35, 0.75, fbm2(vWorld.xz * (1.0 / 900.0) + 3.7, 2) * 0.5 + 0.5)
+        * smoothstep(0.2, 1.6, uWaveHeight);
+  float foam = clamp(crest + surf * 0.8, 0.0, 1.0);
+  vec3 foamLit = (sunCol * max(uSunDirWorld.y, 0.0)
+                  + skyRadiance(vec3(0.0, 1.0, 0.0), uSunDirWorld, uSunIntensity, uHaze)) * 0.28;
+  color = mix(color, foamLit, foam);
+
+  // 대기 — 지형·하늘과 **같은 함수**다.
+  vec3 T, S;
+  atmosphere(-V, uSunDirWorld, uSunIntensity, uHaze, dist, T, S);
+  gl_FragColor = vec4(color * T + S, 1.0);
+}
+`
+);
+const RUNWAY_UNIFORM_DECL = (
+  /* glsl */
+  `
+uniform vec4 uRunway;              // (cos h, sin h, 길이 [m], 반폭 [m]) — NED 원점에서 heading 방향
+uniform float uRunwayOn;           // 0이면 포장면을 칠하지 않는다(폭을 모를 때 — core/runway.ts)
+uniform vec4 uRunwayArea;          // (과주로 [m], 착륙대 반폭 [m], 착륙대 끝 너머 [m], 0) — 착륙대는 펴진 바닥과 같은 구역
+uniform vec4 uRunwayNum;           // 활주로 번호 (시단 쪽 십·일, 맞은편 십·일) — 모르면 -1이고 번호를 칠하지 않는다
+uniform vec4 uRunwayDash;          // 중심선 (줄 길이, 주기 — 줄 하나면 0, 시단에서 시작, 0) [m] — 줄 길이 0이면 없다
+uniform vec4 uRunwayAim;           // 조준점 (시단에서 시작, 줄 길이, 폭, 두 줄 안쪽 간격) [m]
+`
+);
+const RUNWAY_GLSL = (
+  /* glsl */
+  `
+// ---- 활주로 도색 — 띠·숫자의 덮임을 픽셀 발자국 상자로 거른다(발자국은 축마다 — 아래). 가까이선 칼날, 멀어지면
+// 폭/발자국만큼 옅어진다(멀리서 지글거리지 않게). 좌표는 활주로 축 기준 [m]. 치수는 ICAO 부속서 14의 표준이다(실측
+// 아님). 길이로 정해지는 배치(중심선 줄·주기, 조준점)는 core/runway.ts가 셈해 유니폼으로 준다 — 시험이 닿는 곳이다.
+
+// 가운데 0, 반폭 h인 띠의 덮임 — 발자국 상자와 겹친 비율
+float grBand(float x, float h, float pw) {
+  float r = 0.5 * pw;
+  return clamp((min(x + r, h) - max(x - r, -h)) / pw, 0.0, 1.0);
+}
+
+// 주기 P로 되풀이되는 띠(반폭 h, 가운데가 P의 배수) — 발자국이 주기에 다가가면 띠 비율의 평균으로 접는다
+float grStripes(float x, float P, float h, float pw) {
+  float xr = x - P * floor(x / P + 0.5);
+  return mix(grBand(xr, h, pw), 2.0 * h / P, smoothstep(0.3 * P, P, pw));
+}
+
+// 7획 숫자의 획 비트 — a 위 1, b 오른 위 2, c 오른 아래 4, d 아래 8, e 왼 아래 16, f 왼 위 32, g 가운데 64.
+// 1은 가운데 막대 하나라 따로 그린다(활주로 숫자의 1은 오른쪽 두 획이 아니다)
+const int GR_SEG[10] = int[10](63, 0, 91, 79, 102, 109, 125, 7, 127, 111);
+
+// 아래 도색 함수는 발자국을 **축마다** 받는다 — pa 활주로 축 방향, pc 가로 방향(읽는 이의 u가 가로, v가 축이다).
+// 비스듬히 보면 축 방향 발자국만 늘어나므로, 등방 발자국으로 거르면 가는 가로 띠(중심선·측면 표지)가 앞쪽
+// 100~200 m에서 거의 사라졌다(v1.92 리뷰 실측). 조기 반환 경계는 발자국만큼 넓힌다 — 좁으면 멀리서 거른 띠의
+// 가장자리가 그 경계에서 잘려 점선처럼 기었다(같은 리뷰).
+
+// 숫자 하나 — 칸 가로 3 m(u, 읽는 이의 오른쪽이 +) · 세로 9 m(v, 읽는 위쪽이 +), 획 0.9 m. pu·pv는 u·v 방향 발자국
+float grDigit(float d, vec2 uv, float pu, float pv) {
+  if (d < 0.0 || uv.x < -1.0 - pu || uv.x > 4.0 + pu || uv.y < -1.0 - pv || uv.y > 10.0 + pv) return 0.0;
+  const float W = 3.0;
+  const float H = 9.0;
+  const float S = 0.9;
+  int k = clamp(int(d + 0.5), 0, 9);
+  if (k == 1) return grBand(uv.x - 0.5 * W, 0.5 * S, pu) * grBand(uv.y - 0.5 * H, 0.5 * H, pv);
+  int m = GR_SEG[k];
+  float bu = grBand(uv.x - 0.5 * W, 0.5 * W, pu);
+  float lu = grBand(uv.x - 0.5 * S, 0.5 * S, pu);
+  float ru = grBand(uv.x - (W - 0.5 * S), 0.5 * S, pu);
+  float top = grBand(uv.y - 0.75 * H, 0.25 * H, pv);
+  float bot = grBand(uv.y - 0.25 * H, 0.25 * H, pv);
+  float c = 0.0;
+  if ((m & 1) != 0) c = max(c, bu * grBand(uv.y - (H - 0.5 * S), 0.5 * S, pv));
+  if ((m & 2) != 0) c = max(c, ru * top);
+  if ((m & 4) != 0) c = max(c, ru * bot);
+  if ((m & 8) != 0) c = max(c, bu * grBand(uv.y - 0.5 * S, 0.5 * S, pv));
+  if ((m & 16) != 0) c = max(c, lu * bot);
+  if ((m & 32) != 0) c = max(c, lu * top);
+  if ((m & 64) != 0) c = max(c, bu * grBand(uv.y - 0.5 * H, 0.5 * S, pv));
+  return c;
+}
+
+// 활주로 번호 한 끝 — num (십, 일), s 시단에서 활주로 안쪽 [m], x 읽는 이의 오른쪽 [m]. 두 칸(각 3 m)이 가운데
+// 1.5 m를 두고 선다. 시단 줄무늬(6~36 m) 끝에서 12 m 띄운 48~57 m 자리다
+float grDesignation(vec2 num, float s, float x, float pa, float pc) {
+  if (num.x < 0.0 || s < 46.0 - pa || s > 59.0 + pa || abs(x) > 5.5 + pc) return 0.0;
+  float v = s - 48.0;
+  return max(grDigit(num.x, vec2(x + 3.75, v), pc, pa), grDigit(num.y, vec2(x - 0.75, v), pc, pa));
+}
+
+// 시단 줄무늬(피아노 건반) — 시단에서 6~36 m, 축 양쪽 같은 수의 줄. 줄과 칸이 같은 너비이고 가운데 칸만
+// 두 배다. 바깥 끝은 가장자리에서 3 m 안(최대 축에서 27 m) — 고흥 45 m 폭은 12줄, 너비 1.63 m
+float grPiano(float s, float x, float halfW, float pa, float pc) {
+  if (s < 4.0 - pa || s > 38.0 + pa) return 0.0;
+  float nSide = halfW <= 9.0 ? 2.0 : halfW <= 11.5 ? 3.0 : halfW <= 15.0 ? 4.0 : halfW <= 22.5 ? 6.0 : 8.0;
+  float outer = min(halfW - 3.0, 27.0);
+  float sw = outer / (2.0 * nSide);
+  float ax = abs(x);
+  // 줄 k는 축에서 (2k+1)·sw ~ (2k+2)·sw — 가운데 (2k+1.5)·sw, 주기 2·sw
+  float keys = grStripes(ax - 1.5 * sw, 2.0 * sw, 0.5 * sw, pc)
+             * grBand(ax - 0.5 * (sw + outer), 0.5 * (outer - sw), pc);
+  return keys * grBand(s - 21.0, 15.0, pa);
+}
+
+// 중심선 — 너비 0.9 m 줄을 양 끝에서 a0(69 m) 안쪽 구간에 고르게 깐다. 줄 길이·주기는 core/runway.ts
+// centerlineLayout이 셈한다(줄 + 칸 50~75 m, 줄 ≥ 칸·30 m, 양 끝이 온 줄 — 고흥은 30 m 줄 21개, 주기 51.85 m)
+float grCenterline(float along, float x, float L, float pa, float pc) {
+  float s = uRunwayDash.x;
+  float P = uRunwayDash.y;
+  float a0 = uRunwayDash.z;
+  if (s <= 0.0 || along < a0 - pa || along > L - a0 + pa || abs(x) > 1.0 + pc) return 0.0;
+  float dash = P > 0.0 ? grStripes(along - (a0 + 0.5 * s), P, 0.5 * s, pa) : 1.0;
+  return dash * grBand(x, 0.45, pc) * grBand(along - 0.5 * L, 0.5 * L - a0, pa);
+}
+
+// 과주로 갈매기표 — t 시단 밖으로 [m](0이 시단). 꼭짓점이 활주로 쪽을 가리키는 45도 줄, 30 m 간격, 너비 0.9 m.
+// k = t - |x|가 한 갈매기 위에서 일정하다 — 줄의 k 방향 반폭은 0.45의 루트2배, k의 발자국은 두 축 발자국의 합
+float grChevron(float t, float x, float over, float pa, float pc) {
+  if (t < -pa || t > over + pa) return 0.0;
+  return grStripes(t - abs(x) - 6.0, 30.0, 0.64, pa + pc) * grBand(t - 0.5 * over, 0.5 * over, pa);
+}
+
+// 활주로 축 좌표와 축마다 발자국 — p 세계 위치(렌더 x = e, z = -n), dxy 세계 xz의 화면 도함수(dFdx의 x·z, dFdy의
+// x·z). 돌려주는 값은 (along 시단에서 축 방향 [m], across 축의 오른쪽이 + [m], pa 축 방향 발자국 [m], pc 가로
+// 발자국 [m]) — 발자국은 세계 xz 도함수를 활주로 축으로 돌려 잰다
+vec4 grRunwayAxes(vec3 p, vec4 dxy) {
+  vec2 ne = vec2(-p.z, p.x);
+  float along = dot(ne, uRunway.xy);
+  float across = dot(ne, vec2(-uRunway.y, uRunway.x));
+  float pa = max(abs(dxy.x * uRunway.y - dxy.y * uRunway.x) + abs(dxy.z * uRunway.y - dxy.w * uRunway.x), 1.0e-3);
+  float pc = max(abs(dxy.x * uRunway.x + dxy.y * uRunway.y) + abs(dxy.z * uRunway.x + dxy.w * uRunway.y), 1.0e-3);
+  return vec4(along, across, pa, pc);
+}
+
+// 비행장 층마다 몫 (착륙대, 포장면, 흰 도색, 노란 도색) 각 0~1 — ax는 grRunwayAxes. 층은 안으로 겹친다(도색 ⊂ 포장면
+// ⊂ 착륙대)이므로 안쪽 몫은 바깥 몫을 넘지 않게 자르고, 칠할 때는 안쪽 층이 **바깥 층의 몫만** 바꾼다:
+//     c = mix(바탕, 풀, f.x);  c += f.y·(아스팔트 − 풀) + f.z·(흰색 − 아스팔트) + f.w·(노랑 − 아스팔트)
+// 덮임을 곱해 섞으면(mix(c, 흰색, 흰 덮임 × 포장면)) 가장자리에 붙은 측면 표지가 두 번 걸러져 멀리서 중심선보다 40 %
+// 어둡고 움직이면 깜빡였다(v1.94 리뷰 실측). 착륙대 경계는 발자국만큼만 부드럽다 — 예전엔 40~60 m에 걸쳐 섞어 들·
+// 비닐하우스 위에 흐린 띠가 얹혀 보였다(사용자 지적). 시단 사이는 흰색(측면 표지·시단 줄무늬·번호·중심선·조준점),
+// 과주로는 노란 갈매기표이고, 맞은편 끝은 남쪽으로 읽으므로 가로를 뒤집는다
+vec4 grAirfield(vec4 ax) {
+  float along = ax.x;
+  float across = ax.y;
+  float pa = ax.z;
+  float pc = ax.w;
+  float L = uRunway.z;
+  float halfW = uRunway.w;
+  float over = uRunwayArea.x;
+  float field = grBand(across, uRunwayArea.y, pc) * grBand(along - 0.5 * L, 0.5 * L + uRunwayArea.z, pa);
+  if (field <= 0.001) return vec4(0.0);
+  float paved = min(grBand(across, halfW, pc) * grBand(along - 0.5 * L, 0.5 * L + over, pa), field);
+  if (paved <= 0.001) return vec4(field, paved, 0.0, 0.0);
+  float onRunway = grBand(along - 0.5 * L, 0.5 * L, pa);
+  float sF = L - along;
+  float white = grBand(abs(across) - (halfW - 0.45), 0.45, pc) * onRunway;
+  white = max(white, max(grPiano(along, across, halfW, pa, pc), grPiano(sF, -across, halfW, pa, pc)));
+  white = max(white, max(grDesignation(uRunwayNum.xy, along, across, pa, pc),
+                         grDesignation(uRunwayNum.zw, sF, -across, pa, pc)));
+  white = max(white, grCenterline(along, across, L, pa, pc));
+  // 조준점 — (시작, 길이, 폭, 안쪽 간격)은 core/runway.ts aimingPoint가 활주로 길이의 열에서 고른다
+  vec4 aim = uRunwayAim;
+  float aimX = grBand(abs(across) - 0.5 * (aim.w + aim.z), 0.5 * aim.z, pc);
+  white = max(white, aimX * max(grBand(along - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa),
+                                grBand(sF - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa)));
+  float yel = max(grChevron(-along, across, over, pa, pc), grChevron(along - L, -across, over, pa, pc));
+  white = min(white, paved);
+  return vec4(field, paved, white, min(yel, paved - white));
+}
+`
+);
+const RUNWAY_GAME_VARYING_DECL = (
+  /* glsl */
+  `
+varying vec3 vRunwayWorld;
+`
+);
+const RUNWAY_GAME_VERT_BODY = (
+  /* glsl */
+  `
+  vRunwayWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+`
+);
+const RUNWAY_GAME_GLSL = (
+  /* glsl */
+  `
+const vec3 GAME_RW_STRIP   = vec3(0.268, 0.516, 0.106);   // 깎은 풀밭 — sRGB (0.55, 0.74, 0.36), 들판 (0.44, 0.67, 0.31)보다 밝게
+const vec3 GAME_RW_ASPHALT = vec3(0.087, 0.093, 0.106);   // 아스팔트 — sRGB (0.33, 0.34, 0.36)
+const vec3 GAME_RW_PAINT   = vec3(0.681, 0.681, 0.646);   // 흰 도색 — sRGB (0.84, 0.84, 0.82)
+const vec3 GAME_RW_YELLOW  = vec3(0.914, 0.579, 0.036);   // 노란 갈매기표 — sRGB (0.96, 0.78, 0.22)
+`
+);
+const RUNWAY_GAME_FRAG_BODY = (
+  /* glsl */
+  `
+  {
+    vec3 rwDx = dFdx(vRunwayWorld);
+    vec3 rwDy = dFdy(vRunwayWorld);
+    if (uRunwayOn > 0.5) {
+      // 층마다 몫 — 안쪽 층은 바깥 층의 몫만 바꾼다(grAirfield 주석, 실사 지면과 같은 셈)
+      vec4 af = grAirfield(grRunwayAxes(vRunwayWorld, vec4(rwDx.xz, rwDy.xz)));
+      vec3 c = mix(diffuseColor.rgb, GAME_RW_STRIP, af.x);
+      c += af.y * (GAME_RW_ASPHALT - GAME_RW_STRIP);
+      diffuseColor.rgb = c + af.z * (GAME_RW_PAINT - GAME_RW_ASPHALT) + af.w * (GAME_RW_YELLOW - GAME_RW_ASPHALT);
+    }
+  }
+`
+);
+const NOISE_GLSL = (
+  /* glsl */
+  `
+#ifndef NOISE_GLSL_G
+#define NOISE_GLSL_G
+vec2 hash2(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
+}
+
+/** 그래디언트 노이즈 — (값, ∂/∂x, ∂/∂y). 값은 대략 [−0.7, 0.7]. */
+vec3 gnoise2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  vec2 ga = hash2(i);
+  vec2 gb = hash2(i + vec2(1.0, 0.0));
+  vec2 gc = hash2(i + vec2(0.0, 1.0));
+  vec2 gd = hash2(i + vec2(1.0, 1.0));
+  float va = dot(ga, f);
+  float vb = dot(gb, f - vec2(1.0, 0.0));
+  float vc = dot(gc, f - vec2(0.0, 1.0));
+  float vd = dot(gd, f - vec2(1.0, 1.0));
+  float k1 = vb - va;
+  float k2 = vc - va;
+  float k3 = va - vb - vc + vd;
+  float v = va + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
+  vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
+         + du * (vec2(k1, k2) + k3 * vec2(u.y, u.x));
+  return vec3(v, d);
+}
+
+/** 3D 값 노이즈 — 지표 피복의 얼룩·결. 그래디언트 노이즈보다 싸고(해시 8번) 표면 얼룩에는 충분하다. */
+float hash31(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+
+float vnoise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = mix(hash31(i), hash31(i + vec3(1.0, 0.0, 0.0)), f.x);
+  float b = mix(hash31(i + vec3(0.0, 1.0, 0.0)), hash31(i + vec3(1.0, 1.0, 0.0)), f.x);
+  float c = mix(hash31(i + vec3(0.0, 0.0, 1.0)), hash31(i + vec3(1.0, 0.0, 1.0)), f.x);
+  float d = mix(hash31(i + vec3(0.0, 1.0, 1.0)), hash31(i + vec3(1.0, 1.0, 1.0)), f.x);
+  return mix(mix(a, b, f.y), mix(c, d, f.y), f.z);
+}
+
+/** 3옥타브 fBm — 0~0.875. */
+float fbm3(vec3 p) {
+  return 0.5 * vnoise3(p) + 0.25 * vnoise3(p * 2.07 + 1.7) + 0.125 * vnoise3(p * 4.13 + 3.1);
+}
+
+/** fBm — 값만. 옥타브는 최대 5, 라쿠나리티 2.03(정수를 피해 반복 무늬를 줄인다). */
+float fbm2(vec2 p, int octaves) {
+  float v = 0.0;
+  float a = 0.5;
+  float norm = 0.0;
+  for (int i = 0; i < 5; i++) {
+    if (i >= octaves) break;
+    v += a * gnoise2(p).x;
+    norm += a;
+    p = p * 2.03 + vec2(17.3, 9.1);
+    a *= 0.5;
+  }
+  return v / max(norm, 1.0e-6);
+}
+#endif
+`
+);
+function applyGroundDetail(material, uniforms) {
+  const m2 = material;
+  if (m2.__ground) return;
+  m2.__ground = true;
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = function(shader, renderer) {
+    prevCompile.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader.replace("#include <common>", `#include <common>
+${GROUND_VERT_DECL}`).replace("#include <fog_vertex>", `#include <fog_vertex>
+${GROUND_VERT_BODY}`);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <common>",
+      `#include <common>
+${GROUND_VARYING_DECL}
+${ATMOSPHERE_UNIFORM_DECL}
+${ATMOSPHERE_GLSL}
+${CLOUD_UNIFORM_DECL}
+${NOISE_GLSL}
+${CLOUD_COVER_GLSL}
+${COAST_GLSL}
+${GROUND_UNIFORM_DECL}
+${RUNWAY_UNIFORM_DECL}
+${RUNWAY_GLSL}
+${GROUND_GLSL}`
+    ).replace(
+      "#include <metalnessmap_fragment>",
+      `#include <metalnessmap_fragment>
+${GROUND_FRAG_BODY}`
+    ).replace(
+      "#include <normal_fragment_begin>",
+      `#include <normal_fragment_begin>
+${GROUND_NORMAL_BODY}`
+    ).replace(
+      "#include <lights_fragment_end>",
+      `#include <lights_fragment_end>
+${GROUND_LIGHT_BODY}`
+    );
+  };
+  material.customProgramCacheKey = function() {
+    return `ground-v2|${prevKey.call(this)}`;
+  };
+  material.needsUpdate = true;
+}
+function applyGameRunway(material, uniforms) {
+  const m2 = material;
+  if (m2.__gameRunway) return;
+  m2.__gameRunway = true;
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = function(shader, renderer) {
+    prevCompile.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader.replace("#include <common>", `#include <common>
+${RUNWAY_GAME_VARYING_DECL}`).replace("#include <fog_vertex>", `#include <fog_vertex>
+${RUNWAY_GAME_VERT_BODY}`);
+    shader.fragmentShader = shader.fragmentShader.replace("#include <common>", `#include <common>
+${RUNWAY_GAME_VARYING_DECL}
+${RUNWAY_UNIFORM_DECL}
+${RUNWAY_GLSL}
+${RUNWAY_GAME_GLSL}`).replace("#include <color_fragment>", `#include <color_fragment>
+${RUNWAY_GAME_FRAG_BODY}`);
+  };
+  material.customProgramCacheKey = function() {
+    return `game-runway-v1|${prevKey.call(this)}`;
+  };
+  material.needsUpdate = true;
 }
 function chunkQuads(stepM) {
   const target = stepM <= 35 ? 3e3 : 7500;
@@ -43718,884 +43476,6 @@ function createSky(radius) {
       material.dispose();
     }
   };
-}
-const NEAR = 3;
-const NEAR_FAR = 2e3;
-const FAR_NEAR = 1500;
-const FAR = 5e4;
-const SKY_RADIUS = FAR * 0.9;
-const ENGINEERING_POST = {
-  bloomStrength: 0.35,
-  bloomRadius: 0.4,
-  bloomThreshold: 2.5,
-  antialias: true,
-  grade: null
-};
-const CINEMATIC_POST = {
-  bloomStrength: 0.6,
-  bloomRadius: 0.55,
-  bloomThreshold: 1.5,
-  antialias: true,
-  grade: { vignette: 0.42, saturation: 1.12, contrast: 1.055 }
-};
-const GAME_POST = {
-  bloomStrength: 0.5,
-  bloomRadius: 0.5,
-  bloomThreshold: 1.8,
-  antialias: true,
-  grade: { vignette: 0.34, saturation: 1.22, contrast: 1.05 }
-};
-function elevationsOf(p2) {
-  const n2 = p2.rows * p2.cols;
-  const out = new Float32Array(n2);
-  for (let i = 0; i < n2; i++) out[i] = -p2.positions[3 * i + 2];
-  return out;
-}
-class SceneHost {
-  scene = new Scene();
-  camera = new PerspectiveCamera(55, 1, NEAR, FAR);
-  renderer;
-  sky;
-  ocean;
-  sun;
-  ambient;
-  groups = {
-    terrain: new Group(),
-    paths: new Group(),
-    models: new Group(),
-    marks: new Group(),
-    // 활주로 선 — 궤적과 따로 단다. 게임 모드는 궤적을 숨겨도 활주로 선은 보인다(setViewStyle)
-    runway: new Group(),
-    // 게임 모드 두 벌 — 실사 지형과 같은 자리라 스타일이 두 벌 중 하나만 보이게 한다.
-    gameTerrain: new Group(),
-    props: new Group()
-  };
-  stats = { drawCalls: 0, triangles: 0, ms: 0 };
-  disposed = false;
-  post = null;
-  scenePass;
-  size = { w: 1, h: 1, dpr: 1 };
-  /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
-  gridInvViewProj = new Matrix4();
-  raycaster = new Raycaster();
-  ndc = new Vector2();
-  renderScale = 1;
-  sunDirWorld = new Vector3(0.4, 0.6, 0.2);
-  /** 지면 재질의 표고 텍스처·변환 — 지형 두 장이 **이 한 벌**을 꽂는다(`shaders/ground.ts`).
-   *  그림자 광선은 장 경계를 넘어 다른 장의 산을 봐야 하므로 장마다 따로 두면 안 된다. */
-  groundUniforms = {
-    uHeightFine: { value: null },
-    uHeightCoarse: { value: null },
-    uHFine: { value: new Vector4() },
-    uHFineSize: { value: new Vector2(1, 1) },
-    uHCoarse: { value: new Vector4() },
-    uHCoarseSize: { value: new Vector2(1, 1) },
-    uHeightOn: { value: 0 },
-    uTerrainTop: { value: 0 }
-  };
-  /** 활주로 포장면·도색 — 실사 지형과 게임 지형이 **이 한 벌**을 꽂는다(`shaders/runway.ts`). `setRunwaySurface`가
-   *  한 번 쓰면 두 지형이 같이 바뀐다 — 벌이 둘이면 모드를 바꿀 때 한쪽만 옛 활주로를 칠한다. */
-  runwayUniforms = {
-    uRunway: { value: new Vector4(1, 0, 0, 0) },
-    uRunwayOn: { value: 0 },
-    uRunwayArea: { value: new Vector4(0, 0, 0, 0) },
-    uRunwayNum: { value: new Vector4(-1, -1, -1, -1) },
-    uRunwayDash: { value: new Vector4(0, 0, 0, 0) },
-    uRunwayAim: { value: new Vector4(0, 0, 0, 0) }
-  };
-  heightTextures = [];
-  constructor(canvas, context) {
-    this.renderer = new WebGLRenderer({ canvas, context });
-    this.renderer.outputColorSpace = SRGBColorSpace;
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.95;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
-    this.renderer.shadowMap.autoUpdate = false;
-    this.sun = new DirectionalLight(16777215, 1);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = -70;
-    this.sun.shadow.camera.right = 70;
-    this.sun.shadow.camera.top = 70;
-    this.sun.shadow.camera.bottom = -70;
-    this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 1200;
-    this.sun.shadow.bias = -4e-4;
-    this.sun.shadow.normalBias = 0.5;
-    this.scene.add(this.sun.target);
-    this.ambient = new HemisphereLight(12375792, 7040858, 0.9);
-    this.scene.add(this.sun, this.ambient);
-    this.sky = createSky(SKY_RADIUS);
-    this.scene.add(this.sky.mesh);
-    this.ocean = createOcean({ maxDist: FAR * 0.98 });
-    this.scene.add(this.ocean.mesh);
-    for (const g of Object.values(this.groups)) this.scene.add(g);
-    this.groups.gameTerrain.visible = false;
-    this.groups.props.visible = false;
-    this.scenePass = new SplitFrustumPass(
-      this.scene,
-      this.camera,
-      { near: NEAR, nearFar: NEAR_FAR, farNear: FAR_NEAR, far: FAR },
-      [this.sky.mesh]
-    );
-    this.setPost(ENGINEERING_POST);
-  }
-  /** Engineering ↔ Cinematic.
-   *
-   * 컴포저를 갈아 끼우고 궤적 오버레이를 숨긴다. **결과 선택·재생 커서·카메라는 그대로다**
-   * — 같은 런을 두 얼굴로 보는 것이다(계획 §8). 숨긴 것은 캡션이 말한다(컨트롤러 몫). */
-  setViewStyle(style) {
-    this.setPost(
-      style === "cinematic" ? CINEMATIC_POST : style === "game" ? GAME_POST : ENGINEERING_POST
-    );
-    this.groups.paths.visible = style === "engineering";
-    this.groups.runway.visible = style === "engineering" || style === "game";
-    this.groups.marks.visible = style === "engineering" || style === "game";
-    this.groups.terrain.visible = style !== "game";
-    this.groups.gameTerrain.visible = style === "game";
-    this.groups.props.visible = style === "game";
-    this.ocean.setPalette(style === "game");
-  }
-  /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
-  setPost(opts) {
-    this.post?.dispose();
-    this.post = createPost(this.renderer, this.scenePass, this.size.w, this.size.h, opts);
-    this.post.setSize(this.size.w, this.size.h, this.size.dpr);
-  }
-  resize(width, height, dpr) {
-    this.size = { w: width, h: height, dpr };
-    const ratio = Math.min(dpr, 2) * this.renderScale;
-    this.renderer.setPixelRatio(ratio);
-    this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / Math.max(height, 1);
-    this.camera.updateProjectionMatrix();
-    this.post?.setSize(width, height, dpr * this.renderScale);
-  }
-  /** 렌더 배율 — 품질 자동 강등의 한 조정 파라미터.
-   *
-   * 픽셀 수를 배율²로 줄이므로 GPU 픽셀 비용(바다·구름·대기가 다 픽셀 셰이더다)에
-   * 정비례로 듣는다. 기하·걸음 수를 줄이는 것보다 이것 하나가 낫다: 셰이더 재컴파일이
-   * 없어 강등 자체가 프레임을 먹지 않고, 되돌리기도 즉시다. 값은 캡션이 말한다. */
-  setRenderScale(scale) {
-    const s = Math.min(Math.max(scale, 0.4), 1);
-    if (s === this.renderScale) return;
-    this.renderScale = s;
-    this.resize(this.size.w, this.size.h, this.size.dpr);
-  }
-  getRenderScale() {
-    return this.renderScale;
-  }
-  setEnvironment({ sunAzEl, visibility, exposure, sea, cloudCover }) {
-    const [az, el2] = sunAzEl;
-    const w2 = toWorld(Math.cos(el2) * Math.cos(az), Math.cos(el2) * Math.sin(az), -Math.sin(el2));
-    this.sunDirWorld.set(w2[0], w2[1], w2[2]);
-    const intensity = 2.4;
-    const sunColor = setAtmosphere(w2, el2, intensity, visibility);
-    this.sun.color.setRGB(sunColor[0], sunColor[1], sunColor[2]);
-    this.sun.intensity = intensity;
-    this.ambient.intensity = 0.12 + 0.8 * Math.max(Math.sin(el2), 0);
-    this.ocean.setSea(sea);
-    setClouds(cloudCover, [
-      sea.windSpeed * Math.cos(sea.windDir),
-      sea.windSpeed * Math.sin(sea.windDir)
-    ]);
-    this.renderer.toneMappingExposure = exposure;
-  }
-  /** NED 기하 → three 지오메트리 — NaN 정점 방어·축 변환·(있으면) 색 굽기를 한 곳에 둔다.
-   *  실사·게임 두 벌이 각자 돌면 언젠가 한쪽만 고쳐진다(disposeTree의 교훈). 실사 지형은
-   *  색을 셰이더가 정하므로(지표 피복) `colorAt`이 null이다. */
-  patchGeometry(p2, colorAt) {
-    const n2 = p2.positions.length;
-    const pos = new Float32Array(n2);
-    const nrm = new Float32Array(n2);
-    const col = colorAt ? new Float32Array(n2) : null;
-    for (let i = 0; i < n2; i += 3) {
-      const d = Number.isFinite(p2.positions[i + 2]) ? p2.positions[i + 2] : 0;
-      const w2 = toWorld(p2.positions[i], p2.positions[i + 1], d);
-      pos[i] = w2[0];
-      pos[i + 1] = w2[1];
-      pos[i + 2] = w2[2];
-      const nw = toWorld(p2.normals[i], p2.normals[i + 1], p2.normals[i + 2]);
-      nrm[i] = nw[0];
-      nrm[i + 1] = nw[1];
-      nrm[i + 2] = nw[2];
-      if (colorAt && col) colorAt(-d, col, i);
-    }
-    const geo = new BufferGeometry();
-    geo.setAttribute("position", new BufferAttribute(pos, 3));
-    geo.setAttribute("normal", new BufferAttribute(nrm, 3));
-    if (col) geo.setAttribute("color", new BufferAttribute(col, 3));
-    geo.setIndex(new BufferAttribute(p2.indices, 1));
-    return geo;
-  }
-  /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생기고, 그 위에
-   *  지표 피복·지형 자체 그림자·하늘 열림이 얹힌다(`shaders/ground.ts`). */
-  setTerrain(patches) {
-    disposeTree(this.groups.terrain);
-    this.setHeightTextures(patches);
-    for (const p2 of patches) {
-      const geo = this.patchGeometry(p2, null);
-      const shade = terrainShade(elevationsOf(p2), p2.rows, p2.cols, p2.step);
-      const attr = new Float32Array(p2.rows * p2.cols * 2);
-      for (let i = 0; i < p2.rows * p2.cols; i++) {
-        attr[2 * i] = shade.ao[i];
-        attr[2 * i + 1] = shade.convex[i];
-      }
-      geo.setAttribute("aTerrain", new BufferAttribute(attr, 2));
-      const mat = new MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
-      applyGroundDetail(mat, {
-        ...cloudUniforms,
-        ...atmosphereUniforms,
-        ...this.ocean.coastUniforms,
-        ...this.groundUniforms,
-        ...this.runwayUniforms
-      });
-      applyAerialPerspective(mat);
-      const pos = geo.getAttribute("position");
-      const box2 = new Box3();
-      const v2 = new Vector3();
-      for (const ch2 of chunkIndices(geo.getIndex().array, p2.cols, chunkQuads(p2.step))) {
-        box2.makeEmpty();
-        for (let k2 = 0; k2 < ch2.indices.length; k2++) box2.expandByPoint(v2.fromBufferAttribute(pos, ch2.indices[k2]));
-        const g = new BufferGeometry();
-        g.setAttribute("position", pos);
-        g.setAttribute("normal", geo.getAttribute("normal"));
-        g.setAttribute("aTerrain", geo.getAttribute("aTerrain"));
-        g.setIndex(new BufferAttribute(ch2.indices, 1));
-        g.boundingBox = box2.clone();
-        g.boundingSphere = box2.getBoundingSphere(new Sphere());
-        const mesh = new Mesh(g, mat);
-        mesh.receiveShadow = true;
-        this.groups.terrain.add(mesh);
-      }
-    }
-  }
-  /** 활주로 포장면 — 실사 지면과 게임 지형이 아스팔트·도색·과주로·비행장 풀밭을 칠한다(`shaders/runway.ts`).
-   *  null이면 안 칠한다 — 폭을 모르는 활주로에 포장면을 지어내지 않는다(`core/runway.ts`). */
-  setRunwaySurface(s) {
-    const u2 = this.runwayUniforms;
-    if (s == null) {
-      u2.uRunwayOn.value = 0;
-      return;
-    }
-    const v2 = runwayUniformValues(s);
-    u2.uRunway.value.set(...v2.runway);
-    u2.uRunwayArea.value.set(...v2.area);
-    u2.uRunwayNum.value.set(...v2.num);
-    u2.uRunwayDash.value.set(...v2.dash);
-    u2.uRunwayAim.value.set(...v2.aim);
-    u2.uRunwayOn.value = 1;
-  }
-  /** 표고 텍스처 — 가장 촘촘한 장과 가장 넓은 장을 반정밀도로 올린다(지형 자체 그림자용).
-   *
-   * 반정밀도인 이유: WebGL2에서 R16F는 선형 필터가 기본으로 되지만 R32F는 확장
-   * (`OES_texture_float_linear`)이 있어야 한다 — 없으면 최근접으로 떨어져 그림자에 30 m
-   * 계단이 선다. 1,000 m에서 간격이 0.5 m라 그림자 판정에는 충분하다. */
-  setHeightTextures(patches) {
-    for (const t2 of this.heightTextures) t2.dispose();
-    this.heightTextures = [];
-    const u2 = this.groundUniforms;
-    u2.uHeightOn.value = 0;
-    u2.uHeightFine.value = null;
-    u2.uHeightCoarse.value = null;
-    if (patches.length === 0) return;
-    const byStep = [...patches].sort((a, b) => a.step - b.step);
-    let top = 0;
-    const upload = (p2, xf2, size) => {
-      const n2 = p2.rows * p2.cols;
-      const data = new Uint16Array(n2);
-      for (let i = 0; i < n2; i++) {
-        const d = p2.positions[3 * i + 2];
-        const z2 = Number.isFinite(d) ? -d : 0;
-        if (z2 > top) top = z2;
-        data[i] = DataUtils.toHalfFloat(z2);
-      }
-      const tex = new DataTexture(data, p2.cols, p2.rows, RedFormat, HalfFloatType);
-      tex.minFilter = LinearFilter;
-      tex.magFilter = LinearFilter;
-      tex.wrapS = ClampToEdgeWrapping;
-      tex.wrapT = ClampToEdgeWrapping;
-      tex.unpackAlignment = 1;
-      tex.needsUpdate = true;
-      this.heightTextures.push(tex);
-      xf2.set(p2.positions[1], p2.positions[0], p2.step, 0);
-      size.set(p2.cols, p2.rows);
-      return tex;
-    };
-    u2.uHeightFine.value = upload(byStep[0], u2.uHFine.value, u2.uHFineSize.value);
-    const coarse = byStep[byStep.length - 1];
-    u2.uHeightCoarse.value = coarse === byStep[0] ? u2.uHeightFine.value : upload(coarse, u2.uHCoarse.value, u2.uHCoarseSize.value);
-    if (coarse === byStep[0]) {
-      u2.uHCoarse.value.copy(u2.uHFine.value);
-      u2.uHCoarseSize.value.copy(u2.uHFineSize.value);
-    }
-    u2.uTerrainTop.value = top;
-    u2.uHeightOn.value = 1;
-  }
-  /** 게임 모드 지형 — **같은 실측 표고**를 성긴 면 + 게임 램프로 다시 그린다.
-   *
-   * flatShading은 three가 프래그먼트 도함수로 낱면 법선을 만들므로 정점 법선을
-   * 그대로 둬도 큰 면이 선다. 지면 절차 무늬는 걸지 않는다 — 85 m 식생 얼룩이
-   * 90 m 낱면과 간섭해 "한 면 한 색"의 로우폴리 문법을 깬다. 활주로만은 칠한다 — 실사와
-   * 같은 자리·도색을 게임 색으로(`applyGameRunway`). 안 칠하면 게임 모드에서 활주로가
-   * 통째로 없다(사용자 지적). 대기 원근은 건다 — 안 걸면 이 지형만 수평선에서 하늘과 갈라진다. */
-  setGameTerrain(patches, relief) {
-    disposeTree(this.groups.gameTerrain);
-    for (const p2 of patches) {
-      const geo = this.patchGeometry(p2, (elev, out, i) => gameRamp(elev, relief, out, i));
-      const mat = new MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 1,
-        metalness: 0,
-        flatShading: true
-      });
-      applyGameRunway(mat, this.runwayUniforms);
-      applyAerialPerspective(mat);
-      const mesh = new Mesh(geo, mat);
-      mesh.receiveShadow = true;
-      this.groups.gameTerrain.add(mesh);
-    }
-  }
-  /** 게임 소품 그룹 교체 — null이면 비운다. 소유권은 이 그룹이 진다(disposeTree). */
-  setProps(group) {
-    disposeTree(this.groups.props);
-    if (group) this.groups.props.add(group);
-  }
-  /** 캔버스 NDC → 지면 교점 (NED). 게임 지형이 없으면 기준면 y=planeY와의 교점으로
-   *  물러선다. 하늘을 향하면 **null** — 0으로 메우면 지평선 클릭이 원점 웨이포인트를
-   *  지어낸다. 카메라 행렬은 마지막 render()의 것 — 게임 모드는 매 프레임 그린다. */
-  raycastGround(ndcX, ndcY, planeY) {
-    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
-    const hit = this.raycaster.intersectObjects(this.groups.gameTerrain.children, false)[0];
-    let p2 = hit?.point ?? null;
-    if (p2 == null) {
-      const r2 = this.raycaster.ray;
-      const t2 = (planeY - r2.origin.y) / r2.direction.y;
-      p2 = Number.isFinite(t2) && t2 > 0 ? r2.origin.clone().addScaledVector(r2.direction, t2) : null;
-    }
-    if (p2 == null) return null;
-    return [-p2.z, p2.x, -p2.y];
-  }
-  /** 궤적 — `breaks`의 양 끝 중 하나라도 결측이면 그 구간을 그리지 않는다.
-   *
-   * **NaN도 직접 막는다.** `breaks`는 선택 인자라, 그걸 안 주고 NaN이 섞인 점을 넘기면
-   * 바운딩 스피어가 NaN이 되어 **선 전체가 프러스텀 컬링으로 사라진다** —
-   * `setTerrain`이 같은 이유로 방어하는 그 함정이고, 원인이 전혀 안 보인다. */
-  setPaths(lines) {
-    this.fillLines(this.groups.paths, lines);
-  }
-  /** 활주로 선 — 지형이 없거나(도색할 땅이 없다) 폭을 모를 때의 선분들(`core/runway.ts`). 궤적과 따로 다는 것은
-   *  보이는 모드가 달라서다: 게임 모드는 궤적을 숨기지만 활주로는 보여야 한다. */
-  setRunwayLines(lines) {
-    this.fillLines(this.groups.runway, lines);
-  }
-  /** 선 목록 → 그룹 — 궤적·활주로 선이 같이 쓴다(결측 방어가 한 곳에 있게). */
-  fillLines(group, lines) {
-    disposeTree(group);
-    for (const ln of lines) {
-      const count = ln.points.length / 3;
-      if (count < 2) continue;
-      const broken = new Set(ln.breaks ?? []);
-      const ok2 = (k2) => !broken.has(k2) && Number.isFinite(ln.points[3 * k2]) && Number.isFinite(ln.points[3 * k2 + 1]) && Number.isFinite(ln.points[3 * k2 + 2]);
-      const verts = [];
-      for (let i = 0; i + 1 < count; i++) {
-        if (!ok2(i) || !ok2(i + 1)) continue;
-        for (const k2 of [i, i + 1]) {
-          const w2 = toWorld(ln.points[3 * k2], ln.points[3 * k2 + 1], ln.points[3 * k2 + 2]);
-          verts.push(w2[0], w2[1], w2[2]);
-        }
-      }
-      if (verts.length === 0) continue;
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new BufferAttribute(new Float32Array(verts), 3));
-      const mat = new LineBasicMaterial({ color: ln.color });
-      applyAerialPerspective(mat);
-      group.add(new LineSegments(geo, mat));
-    }
-  }
-  /** 표지 — 웨이포인트 기둥·포획원과 출발점. 옛 화면의 `setMarkers`와 같은 어휘다.
-   *
-   * 웨이포인트는 지점 자체가 아니라 **지점 + 포획 반경**이 유도의 사실이다 — 원이 없으면
-   * "지나갔는데 왜 잡혔지/안 잡혔지"를 화면이 설명하지 못한다. 고도가 없는 웨이포인트는
-   * 호출측이 활주로 표고를 넣어 준다(그 선택은 캡션 몫이 아니라 관례다 — 옛 화면과 같다). */
-  setMarkers(marks) {
-    disposeTree(this.groups.marks);
-    for (const m2 of marks) {
-      const w2 = toWorld(m2.ne[0], m2.ne[1], m2.ne[2]);
-      if (m2.kind === "start") {
-        const geo2 = new SphereGeometry(0.8, 12, 10);
-        const mesh = new Mesh(geo2, new MeshStandardMaterial({ color: 3458905, roughness: 0.7 }));
-        mesh.position.set(w2[0], w2[1], w2[2]);
-        this.groups.marks.add(mesh);
-        continue;
-      }
-      const seg = new Float32Array([w2[0], w2[1], w2[2], w2[0], w2[1] + 120, w2[2]]);
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new BufferAttribute(seg, 3));
-      this.groups.marks.add(new LineSegments(geo, new LineBasicMaterial({ color: 16749824 })));
-      if (m2.radius > 0) {
-        const n2 = 64;
-        const pts = new Float32Array(n2 * 6);
-        for (let i = 0; i < n2; i++) {
-          for (const [j, k2] of [[0, i], [1, (i + 1) % n2]]) {
-            const a = 2 * Math.PI * k2 / n2;
-            const c = toWorld(m2.ne[0] + m2.radius * Math.cos(a), m2.ne[1] + m2.radius * Math.sin(a), m2.ne[2]);
-            pts.set(c, i * 6 + j * 3);
-          }
-        }
-        const cg2 = new BufferGeometry();
-        cg2.setAttribute("position", new BufferAttribute(pts, 3));
-        this.groups.marks.add(new LineSegments(cg2, new LineBasicMaterial({
-          color: 16749824,
-          transparent: true,
-          opacity: 0.7
-        })));
-      }
-    }
-  }
-  /** 모델 그룹 — GLB 루트를 넣고 뺀다.
-   *
-   * **여기 넣은 것은 `dispose()`가 함께 파괴한다.** `models.ts`가 노드 핸들을 들고
-   * 있을 뿐 소유권은 이 그룹에 있다는 뜻이다. 장래에 GLTF를 모듈 수준으로 캐시하면
-   * (탭을 오갈 때 다시 안 받으려고) 그 캐시가 내주는 지오메트리를 여기가 파괴하게 되어
-   * 다음 SceneHost가 빈 메시를 받는다 — 캐시를 넣는다면 이 그룹에는 `clone()`을 넣어야 한다. */
-  get modelGroup() {
-    return this.groups.models;
-  }
-  /** 해안 거리장 — 결과가 바뀔 때. `null`이면 해면이 전부 열린 바다가 된다. */
-  setCoast(field) {
-    this.ocean.setCoast(field);
-  }
-  /** 지금의 해상 상태 — 캡션이 수치를 말한다. */
-  seaState() {
-    return this.ocean.describe();
-  }
-  /** @param timeSec 해면 위상에 쓸 시각 [s]. **시뮬 시각**을 넣는다 — 벽시계로 돌리면
-   *  멈춘 화면에서도 파도가 움직여야 하고, 그러면 온디맨드 렌더 루프가 무너진다. */
-  render(cam, timeSec) {
-    if (this.disposed || this.post == null) return;
-    const t0 = performance.now();
-    const eye = toWorld(cam.eye[0], cam.eye[1], cam.eye[2]);
-    const target = toWorld(cam.target[0], cam.target[1], cam.target[2]);
-    const up = toWorld(cam.up[0], cam.up[1], cam.up[2]);
-    this.camera.position.set(eye[0], eye[1], eye[2]);
-    this.camera.up.set(up[0], up[1], up[2]).normalize();
-    this.camera.lookAt(new Vector3(target[0], target[1], target[2]));
-    this.camera.fov = cam.fovY * 180 / Math.PI;
-    this.sky.mesh.position.copy(this.camera.position);
-    this.sun.target.position.set(target[0], target[1], target[2]);
-    this.sun.position.set(
-      target[0] + this.sunDirWorld.x * 500,
-      target[1] + this.sunDirWorld.y * 500,
-      target[2] + this.sunDirWorld.z * 500
-    );
-    this.renderer.shadowMap.needsUpdate = true;
-    this.camera.near = NEAR;
-    this.camera.far = FAR;
-    this.camera.updateProjectionMatrix();
-    this.camera.updateMatrixWorld(true);
-    setCloudTime(timeSec);
-    this.ocean.setView(
-      this.camera.position,
-      this.gridInvViewProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).invert(),
-      timeSec,
-      cam.fovY,
-      this.camera.aspect
-    );
-    this.renderer.info.autoReset = false;
-    this.renderer.info.reset();
-    try {
-      this.post.render();
-    } finally {
-      this.renderer.info.autoReset = true;
-    }
-    const scene = this.post.sceneStats();
-    this.stats = { ...scene, ms: performance.now() - t0 };
-  }
-  getStats() {
-    return this.stats;
-  }
-  describe() {
-    const caps = this.renderer.capabilities;
-    const gl2 = this.renderer.getContext();
-    return {
-      name: "three WebGL2",
-      maxTextureSize: caps.maxTextureSize,
-      maxAnisotropy: caps.getMaxAnisotropy(),
-      // 깊이 정책의 전제다 — 24비트를 가정하고 분할 구간을 골랐다(위 주석의 실측표).
-      depthBits: gl2.getParameter(gl2.DEPTH_BITS)
-    };
-  }
-  dispose() {
-    if (this.disposed) return;
-    this.disposed = true;
-    this.post?.dispose();
-    this.post = null;
-    for (const g of Object.values(this.groups)) disposeTree(g);
-    for (const t2 of this.heightTextures) t2.dispose();
-    this.heightTextures = [];
-    this.sky.dispose();
-    this.ocean.dispose();
-    this.scene.clear();
-    this.renderer.dispose();
-    this.renderer.forceContextLoss();
-  }
-}
-function createSceneHost(canvas) {
-  if (typeof WebGL2RenderingContext === "undefined") {
-    return { host: null, reason: "이 브라우저가 WebGL2를 지원하지 않습니다." };
-  }
-  const context = canvas.getContext("webgl2", { antialias: true });
-  if (context == null) {
-    return {
-      host: null,
-      reason: "WebGL2 컨텍스트를 만들지 못했습니다 — 하드웨어 가속이 꺼져 있거나 GPU가 차단된 환경일 수 있습니다."
-    };
-  }
-  try {
-    return { host: new SceneHost(canvas, context), reason: null };
-  } catch (e) {
-    return { host: null, reason: `렌더러를 만들지 못했습니다 — ${e.message}` };
-  }
-}
-const COAST_DEPTH = {
-  /** 첫 고리 수심 = 맞닿은 땅 높이 평균 × 이 값 */
-  firstRingGain: 0.8,
-  minM: 1,
-  maxFirstM: 15,
-  /** 고리마다 깊어지는 배율과 상한 */
-  ringGrowth: 1.6,
-  maxM: 30,
-  /** 내리는 고리 수 — 3차 보간의 지지 범위(4×4)가 닿는 데까지 */
-  rings: 3
-};
-function coastalDepths(elev, rows, cols, cells) {
-  const n2 = rows * cols;
-  const out = Float32Array.from(elev);
-  const ring = new Int8Array(n2);
-  let frontier = [];
-  for (let r2 = 0; r2 < rows; r2++) {
-    for (let c = 0; c < cols; c++) {
-      const i = r2 * cols + c;
-      if (cells[i] !== CELL.SEA) continue;
-      let sum = 0;
-      let k2 = 0;
-      for (let dr = -1; dr <= 1; dr++) {
-        for (let dc2 = -1; dc2 <= 1; dc2++) {
-          if (!dr && !dc2) continue;
-          const rr = r2 + dr;
-          const cc2 = c + dc2;
-          if (rr < 0 || cc2 < 0 || rr >= rows || cc2 >= cols) continue;
-          const j = rr * cols + cc2;
-          if (cells[j] !== CELL.LAND) continue;
-          const z2 = elev[j];
-          if (!Number.isFinite(z2)) continue;
-          sum += Math.max(z2, 0);
-          k2++;
-        }
-      }
-      if (k2 === 0) continue;
-      const d = Math.min(Math.max(COAST_DEPTH.firstRingGain * (sum / k2), COAST_DEPTH.minM), COAST_DEPTH.maxFirstM);
-      out[i] = -d;
-      ring[i] = 1;
-      frontier.push(i);
-    }
-  }
-  for (let k2 = 2; k2 <= COAST_DEPTH.rings && frontier.length > 0; k2++) {
-    const next = /* @__PURE__ */ new Map();
-    for (const i of frontier) {
-      const r2 = i / cols | 0;
-      const c = i - r2 * cols;
-      for (let dr = -1; dr <= 1; dr++) {
-        for (let dc2 = -1; dc2 <= 1; dc2++) {
-          if (!dr && !dc2) continue;
-          const rr = r2 + dr;
-          const cc2 = c + dc2;
-          if (rr < 0 || cc2 < 0 || rr >= rows || cc2 >= cols) continue;
-          const j = rr * cols + cc2;
-          if (cells[j] !== CELL.SEA || ring[j] !== 0) continue;
-          const acc = next.get(j) ?? { sum: 0, n: 0 };
-          acc.sum += -out[i];
-          acc.n++;
-          next.set(j, acc);
-        }
-      }
-    }
-    frontier = [];
-    for (const [j, acc] of next) {
-      out[j] = -Math.min(COAST_DEPTH.ringGrowth * (acc.sum / acc.n), COAST_DEPTH.maxM);
-      ring[j] = k2;
-      frontier.push(j);
-    }
-  }
-  return out;
-}
-const REFINE_MIN_STEP_M = 60;
-const W = [-1 / 16, 9 / 16, 9 / 16, -1 / 16];
-function refineGrid(elev, rows, cols) {
-  const R2 = 2 * rows - 1;
-  const C2 = 2 * cols - 1;
-  const out = new Float32Array(R2 * C2);
-  const raw = (r2, c) => elev[r2 * cols + c];
-  const atCol = (r2, c) => {
-    if (cols === 1) return raw(r2, 0);
-    if (c < 0) return 2 * raw(r2, 0) - raw(r2, 1);
-    if (c >= cols) return 2 * raw(r2, cols - 1) - raw(r2, cols - 2);
-    return raw(r2, c);
-  };
-  const at = (r2, c) => {
-    if (rows === 1) return atCol(0, c);
-    if (r2 < 0) return 2 * atCol(0, c) - atCol(1, c);
-    if (r2 >= rows) return 2 * atCol(rows - 1, c) - atCol(rows - 2, c);
-    return atCol(r2, c);
-  };
-  for (let i = 0; i < R2; i++) {
-    const r0 = i >> 1;
-    const oddR = (i & 1) === 1;
-    for (let j = 0; j < C2; j++) {
-      const c0 = j >> 1;
-      const oddC = (j & 1) === 1;
-      const k2 = i * C2 + j;
-      if (!oddR && !oddC) {
-        out[k2] = at(r0, c0);
-        continue;
-      }
-      const corners = !oddR ? [at(r0, c0), at(r0, c0 + 1)] : !oddC ? [at(r0, c0), at(r0 + 1, c0)] : [at(r0, c0), at(r0, c0 + 1), at(r0 + 1, c0), at(r0 + 1, c0 + 1)];
-      let lo = Infinity;
-      let hi2 = -Infinity;
-      let mean = 0;
-      let cornersOk = true;
-      for (const v22 of corners) {
-        if (!Number.isFinite(v22)) {
-          cornersOk = false;
-          break;
-        }
-        lo = Math.min(lo, v22);
-        hi2 = Math.max(hi2, v22);
-        mean += v22 / corners.length;
-      }
-      if (!cornersOk) {
-        out[k2] = Number.NaN;
-        continue;
-      }
-      let v2 = 0;
-      let ok2 = true;
-      if (!oddR) {
-        for (let t2 = 0; t2 < 4 && ok2; t2++) {
-          const s = at(r0, c0 - 1 + t2);
-          ok2 = Number.isFinite(s);
-          v2 += W[t2] * s;
-        }
-      } else if (!oddC) {
-        for (let t2 = 0; t2 < 4 && ok2; t2++) {
-          const s = at(r0 - 1 + t2, c0);
-          ok2 = Number.isFinite(s);
-          v2 += W[t2] * s;
-        }
-      } else {
-        for (let a = 0; a < 4 && ok2; a++) {
-          let row = 0;
-          for (let b = 0; b < 4 && ok2; b++) {
-            const s = at(r0 - 1 + a, c0 - 1 + b);
-            ok2 = Number.isFinite(s);
-            row += W[b] * s;
-          }
-          v2 += W[a] * row;
-        }
-      }
-      out[k2] = ok2 ? Math.min(Math.max(v2, lo), hi2) : mean;
-    }
-  }
-  return { elev: out, rows: R2, cols: C2 };
-}
-function seaQuad(mask) {
-  const at = (r2, c) => mask.cells[r2 * mask.cols + c];
-  return (r0, c0, r1, c1) => {
-    for (let r2 = r0; r2 <= r1; r2++) {
-      for (let c = c0; c <= c1; c++) {
-        if (at(r2, c) !== CELL.SEA) return false;
-      }
-    }
-    return true;
-  };
-}
-function tierElevations(tier) {
-  const elev = new Float32Array(tier.rows * tier.cols);
-  for (let i = 0; i < elev.length; i++) {
-    const v2 = tier.raw[i];
-    elev[i] = v2 === tier.nodata ? Number.NaN : tier.offset + v2 * tier.scale;
-  }
-  return elev;
-}
-function quantize(tier, z2) {
-  return Number.isFinite(z2) ? Math.min(Math.max(Math.round((z2 - tier.offset) / tier.scale), 0), tier.nodata - 1) : tier.nodata;
-}
-function inlandLand(mask) {
-  const { rows, cols, cells } = mask;
-  return (i) => {
-    if (cells[i] !== CELL.LAND) return false;
-    const r2 = i / cols | 0;
-    const c = i - r2 * cols;
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc2 = -1; dc2 <= 1; dc2++) {
-        const rr = r2 + dr;
-        const cc2 = c + dc2;
-        if (rr >= 0 && cc2 >= 0 && rr < rows && cc2 < cols && cells[rr * cols + cc2] === CELL.SEA) return false;
-      }
-    }
-    return true;
-  };
-}
-function byStepAsc(a, b) {
-  return a.step - b.step;
-}
-function boundingRect(rects) {
-  if (rects.length === 0) return null;
-  let { n0, e0, n1, e1 } = rects[0];
-  for (const r2 of rects.slice(1)) {
-    n0 = Math.min(n0, r2.n0);
-    e0 = Math.min(e0, r2.e0);
-    n1 = Math.max(n1, r2.n1);
-    e1 = Math.max(e1, r2.e1);
-  }
-  return { n0, e0, n1, e1 };
-}
-function renderTier(tier, mask, refine, floor = null) {
-  let elev = tierElevations(tier);
-  if (mask) elev = coastalDepths(elev, tier.rows, tier.cols, mask.cells);
-  if (floor) {
-    elev = floorGrid(
-      elev,
-      tier.rows,
-      tier.cols,
-      tier.n0,
-      tier.e0,
-      tier.step,
-      floor,
-      mask ? inlandLand(mask) : void 0
-    ).elev;
-  }
-  const doRefine = refine && tier.step >= REFINE_MIN_STEP_M && tier.rows > 1 && tier.cols > 1;
-  let rows = tier.rows;
-  let cols = tier.cols;
-  let step2 = tier.step;
-  if (doRefine) {
-    const g = refineGrid(elev, rows, cols);
-    elev = g.elev;
-    rows = g.rows;
-    cols = g.cols;
-    step2 = tier.step / 2;
-  }
-  const raw = new Uint16Array(rows * cols);
-  for (let i = 0; i < raw.length; i++) raw[i] = quantize(tier, elev[i]);
-  const out = { ...tier, rows, cols, step: step2, raw };
-  if (!mask) return { tier: out, skipCell: null, refined: doRefine };
-  const sea = seaQuad(mask);
-  return {
-    tier: out,
-    // 세분 격자 (r, c) → 원래 격자 (r/2, c/2). 세분한 칸은 원래 칸 하나 안에 들므로 내림·올림이 그 칸이다.
-    skipCell: doRefine ? (r0, c0, r1, c1) => sea(r0 >> 1, c0 >> 1, r1 + 1 >> 1, c1 + 1 >> 1) : sea,
-    refined: doRefine
-  };
-}
-function groundTier(tier, mask, floor) {
-  const src = tierElevations(tier);
-  const g = floorGrid(
-    src,
-    tier.rows,
-    tier.cols,
-    tier.n0,
-    tier.e0,
-    tier.step,
-    floor,
-    mask ? inlandLand(mask) : void 0
-  );
-  if (g.touched === 0) return tier;
-  const raw = Uint16Array.from(tier.raw);
-  for (let i = 0; i < raw.length; i++) {
-    if (Number.isFinite(src[i]) && g.elev[i] !== src[i]) raw[i] = quantize(tier, g.elev[i]);
-  }
-  return { ...tier, raw };
-}
-const m1 = (v2) => String(Number(v2.toFixed(1)));
-function buildTerrain(pack, opts = {}) {
-  const masks = buildSeaMasks(pack.tiers);
-  const inner = [...pack.tiers].sort(byStepAsc);
-  const meshes = [];
-  const notes = [];
-  let anyRefined = false;
-  const want = opts.floor ?? null;
-  let floorSrc = null;
-  if (want) {
-    for (const tier of inner) {
-      const mask = masks.get(tier.name);
-      floorSrc = floorSource(
-        tierElevations(tier),
-        tier.rows,
-        tier.cols,
-        tier.n0,
-        tier.e0,
-        tier.step,
-        want,
-        mask ? inlandLand(mask) : void 0
-      );
-      if (floorSrc) break;
-    }
-  }
-  const floor = want && floorFits(want, floorSrc) ? want : null;
-  for (let i = 0; i < inner.length; i++) {
-    const tier = inner[i];
-    const mask = masks.get(tier.name);
-    const skipRect = boundingRect(inner.slice(0, i).map(tierRect));
-    const rt = renderTier(tier, mask, opts.refine ?? true, floor);
-    anyRefined ||= rt.refined;
-    meshes.push(buildTerrainMesh(rt.tier, {
-      stride: opts.strideFor?.(rt.tier) ?? 1,
-      skipRect,
-      skipCell: rt.skipCell
-    }));
-    const mesh = meshes[meshes.length - 1];
-    if (mesh.triangles === 0) {
-      notes.push(`${tier.name}: 안쪽 티어에 가려 그리지 않았습니다.`);
-    } else if (mask) {
-      const n2 = mask.rows * mask.cols;
-      notes.push(
-        `${tier.name}: ${tier.step} m 격자${rt.refined ? `(그릴 때 ${rt.tier.step} m로 세분)` : ""} · 바다 ${(100 * mask.seaCells / n2).toFixed(0)}%` + (mask.missingCells > 0 ? ` · 결측 ${(100 * mask.missingCells / n2).toFixed(1)}%(구멍으로 둡니다)` : "")
-      );
-    }
-  }
-  const cited = pack.tiers.find((t2) => t2.source);
-  if (cited?.source) {
-    const res = cited.source_res_m;
-    notes.push(`지형 출처: ${cited.source}${res ? ` (약 ${res.toFixed(0)} m/px)` : ""}`);
-  }
-  notes.push(
-    "해안선은 표고 0의 **경계 연결 성분**으로 판정했습니다 — 해수면 높이의 간척지·저지대는 육지로 남습니다. 표고만으로는 활주로와 먼바다를 가릴 수 없습니다."
-  );
-  const cl2 = pack.cleaning;
-  const needles = cl2?.per_stage?.reduce((a, b) => a + b, 0);
-  if (cl2 == null || typeof needles !== "number") {
-    notes.push("이 지형 팩은 첨탑 정리 전에 구웠습니다 — 만·해안에 바늘 같은 첨탑이 보이면 scripts/terrain/build_terrain.py로 다시 구우십시오.");
-  } else if (typeof cl2.spires_px !== "number") {
-    notes.push(`원자료 첨탑 정리(1차): 물 위에 튄 표고 ${needles}픽셀을 이웃 중앙값으로 바꿨습니다. 해안의 낮은 원뿔·벽은 이 팩에 남아 있습니다 — scripts/terrain/build_terrain.py로 다시 구우십시오.`);
-  } else {
-    notes.push(`원자료 정리: 물 위 바늘 ${needles}픽셀, 1픽셀 벽·도랑 ${cl2.walls_px ?? 0}, 평지·바다 위 좁은 기둥 ${cl2.spires_px}, 그 둘레 해안 잡음 지대 ${cl2.zone_px ?? 0}픽셀을 다듬었습니다 — 산지와 폭 95 m 넘는 섬은 건드리지 않습니다.`);
-  }
-  notes.push(
-    "지형 색은 꼴(경사·표고·볼록도·해안 거리)로 판정한 지표 피복 — 논밭·숲·마을·갯벌·암반 — 의 절차 무늬이며 영상지도가 아닙니다. 필지·지붕·나무 하나하나는 표시용이고 실제 지표 피복이 아닙니다. 해안 둘레 바다의 낮은 턱(원자료가 얕은 바다를 거친 표고로 메운 자리)은 갯벌로 칠합니다."
-  );
-  notes.push(
-    "물가선은 바다 쪽 첫 세 칸을 물속으로 이어 내려(땅 높이에 비례한 1~30 m의 표시용 수심 — 실제 수심이 아닙니다) 격자 꼭짓점의 톱니 대신 높이를 따라 그립니다." + (anyRefined ? " 외곽 격자는 그릴 때 3차 보간으로 두 배 촘촘히 해 작은 언덕을 둥글게 그립니다(원래 표본 범위를 넘지 않게 자릅니다). 둘 다 그림에만 들어가고 지면 높이 판독은 원자료 격자를 씁니다." : " 이것은 그림에만 들어가고 지면 높이 판독은 원자료 격자를 씁니다.")
-  );
-  if (want) {
-    notes.push(floor && floorSrc ? `활주로 바닥: 축 양옆 ${RUNWAY_FLOOR.halfWidthM} m·양 끝 너머 ${RUNWAY_FLOOR.endM} m를 활주로 표고 ${m1(floor.elevation)} m로 평평하게 그리고, 바깥 ${RUNWAY_FLOOR.blendM} m에서 원자료로 이었습니다 — 원자료는 이 구역에서 ${m1(floorSrc.min)}~${m1(floorSrc.max)} m로 출렁입니다(표고 자료의 오차 수준). 시뮬은 땅을 활주로 표고의 평면으로 계산하므로, 펴지 않으면 멈춘 기체가 솟은 지면에 묻힙니다. 이 구역에서는 지면 높이 판독도 편 높이를 씁니다(바다에 맞닿은 땅은 펴지 않습니다).` : floorSrc ? `활주로 바닥: 활주로 표고 ${m1(want.elevation)} m가 그 자리 지형(${m1(floorSrc.min)}~${m1(floorSrc.max)} m)에서 ${FLOOR_FIT_M} m 넘게 벗어나 펴지 않았습니다 — 펴면 없는 둑이나 구덩이를 짓게 됩니다. 시뮬은 땅을 활주로 표고의 평면으로 계산하므로 지상의 기체가 그만큼 떠 보이거나 묻혀 보이고, 지면 높이 판독도 원자료 그대로입니다.` : "활주로 바닥: 지형이 활주로 자리를 덮지 않아 펴지 않았습니다.");
-  }
-  notes.push(
-    "산그늘은 표고 격자를 태양 쪽으로 훑어 그리고(격자 30·90 m만큼 무디며, 걸음 사이의 좁은 능선은 놓칠 수 있습니다), 골짜기의 어둑함은 반경 60·180·540 m의 상대 표고로 어림한 하늘 열림입니다 — 둘 다 표시용 근사입니다."
-  );
-  const groundTiers = floor ? pack.tiers.map((t2) => groundTier(t2, masks.get(t2.name), floor)) : pack.tiers;
-  return { meshes, masks, notes, floor, groundTiers, runwayCovered: floorSrc !== null };
 }
 function toTrianglesDrawMode(geometry, drawMode) {
   if (drawMode === TrianglesDrawMode) {
@@ -47213,6 +46093,24 @@ function vehicleDriveNodes(scene) {
   });
   return driveNodesFor(declared);
 }
+function setModelEnvironment(root, env, intensity) {
+  let changed = 0;
+  root.traverse((o) => {
+    const m2 = o.material;
+    if (!m2) return;
+    for (const one of Array.isArray(m2) ? m2 : [m2]) {
+      const std = one;
+      if (!std.isMeshStandardMaterial) continue;
+      if (std.envMap !== env) {
+        if (std.envMap == null !== (env == null)) std.needsUpdate = true;
+        std.envMap = env;
+        changed += 1;
+      }
+      std.envMapIntensity = intensity;
+    }
+  });
+  return changed;
+}
 const LAUNCHER_NODES = [
   "Turntable",
   "Cradle",
@@ -47247,11 +46145,7 @@ async function loadModel(url, expect, signal) {
     if (!m2) return;
     o.castShadow = true;
     o.receiveShadow = true;
-    for (const one of Array.isArray(m2) ? m2 : [m2]) {
-      const wear = WEAR_BY_MATERIAL[one.name];
-      if (wear) applyWear(one, wear);
-      applyAerialPerspective(one);
-    }
+    for (const one of Array.isArray(m2) ? m2 : [m2]) applyAerialPerspective(one);
   });
   return {
     model: {
@@ -47367,6 +46261,921 @@ function showLauncher(model, siteNed, pose2) {
   }
   placeLauncher(model, siteNed, pose2);
   return applyLauncher(model, pose2);
+}
+const MODEL_ENV_INTENSITY = 0.6;
+const ENV_GROUND_ALBEDO = [0.1, 0.1, 0.075];
+const NEAR = 3;
+const NEAR_FAR = 2e3;
+const FAR_NEAR = 1500;
+const FAR = 5e4;
+const SKY_RADIUS = FAR * 0.9;
+const ENGINEERING_POST = {
+  bloomStrength: 0.35,
+  bloomRadius: 0.4,
+  bloomThreshold: 2.5,
+  antialias: true,
+  grade: null
+};
+const CINEMATIC_POST = {
+  bloomStrength: 0.6,
+  bloomRadius: 0.55,
+  bloomThreshold: 1.5,
+  antialias: true,
+  grade: { vignette: 0.42, saturation: 1.12, contrast: 1.055 }
+};
+const GAME_POST = {
+  bloomStrength: 0.5,
+  bloomRadius: 0.5,
+  bloomThreshold: 1.8,
+  antialias: true,
+  grade: { vignette: 0.34, saturation: 1.22, contrast: 1.05 }
+};
+function elevationsOf(p2) {
+  const n2 = p2.rows * p2.cols;
+  const out = new Float32Array(n2);
+  for (let i = 0; i < n2; i++) out[i] = -p2.positions[3 * i + 2];
+  return out;
+}
+class SceneHost {
+  scene = new Scene();
+  camera = new PerspectiveCamera(55, 1, NEAR, FAR);
+  renderer;
+  sky;
+  ocean;
+  sun;
+  ambient;
+  /** 모델 환경광 — 하늘(구름 포함)과 그 아래 땅을 PMREM으로 굽는다. `setEnvironment`가 더럽히고 다음 `render`가
+   *  **한 번** 굽는다 — 시각·구름 슬라이더를 끌면 한 프레임에 여러 번 불린다. */
+  pmrem;
+  envScene = new Scene();
+  envGround;
+  envTarget = null;
+  envDirty = true;
+  groups = {
+    terrain: new Group(),
+    paths: new Group(),
+    models: new Group(),
+    marks: new Group(),
+    // 활주로 선 — 궤적과 따로 단다. 게임 모드는 궤적을 숨겨도 활주로 선은 보인다(setViewStyle)
+    runway: new Group(),
+    // 게임 모드 두 벌 — 실사 지형과 같은 자리라 스타일이 두 벌 중 하나만 보이게 한다.
+    gameTerrain: new Group(),
+    props: new Group()
+  };
+  stats = { drawCalls: 0, triangles: 0, ms: 0 };
+  disposed = false;
+  post = null;
+  scenePass;
+  size = { w: 1, h: 1, dpr: 1 };
+  /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
+  gridInvViewProj = new Matrix4();
+  raycaster = new Raycaster();
+  ndc = new Vector2();
+  renderScale = 1;
+  sunDirWorld = new Vector3(0.4, 0.6, 0.2);
+  /** 지면 재질의 표고 텍스처·변환 — 지형 두 장이 **이 한 벌**을 꽂는다(`shaders/ground.ts`).
+   *  그림자 광선은 장 경계를 넘어 다른 장의 산을 봐야 하므로 장마다 따로 두면 안 된다. */
+  groundUniforms = {
+    uHeightFine: { value: null },
+    uHeightCoarse: { value: null },
+    uHFine: { value: new Vector4() },
+    uHFineSize: { value: new Vector2(1, 1) },
+    uHCoarse: { value: new Vector4() },
+    uHCoarseSize: { value: new Vector2(1, 1) },
+    uHeightOn: { value: 0 },
+    uTerrainTop: { value: 0 }
+  };
+  /** 활주로 포장면·도색 — 실사 지형과 게임 지형이 **이 한 벌**을 꽂는다(`shaders/runway.ts`). `setRunwaySurface`가
+   *  한 번 쓰면 두 지형이 같이 바뀐다 — 벌이 둘이면 모드를 바꿀 때 한쪽만 옛 활주로를 칠한다. */
+  runwayUniforms = {
+    uRunway: { value: new Vector4(1, 0, 0, 0) },
+    uRunwayOn: { value: 0 },
+    uRunwayArea: { value: new Vector4(0, 0, 0, 0) },
+    uRunwayNum: { value: new Vector4(-1, -1, -1, -1) },
+    uRunwayDash: { value: new Vector4(0, 0, 0, 0) },
+    uRunwayAim: { value: new Vector4(0, 0, 0, 0) }
+  };
+  heightTextures = [];
+  constructor(canvas, context) {
+    this.renderer = new WebGLRenderer({ canvas, context });
+    this.renderer.outputColorSpace = SRGBColorSpace;
+    this.renderer.toneMapping = ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.95;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.sun = new DirectionalLight(16777215, 1);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.camera.left = -70;
+    this.sun.shadow.camera.right = 70;
+    this.sun.shadow.camera.top = 70;
+    this.sun.shadow.camera.bottom = -70;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 1200;
+    this.sun.shadow.bias = -4e-4;
+    this.sun.shadow.normalBias = 0.5;
+    this.scene.add(this.sun.target);
+    this.ambient = new HemisphereLight(12375792, 7040858, 0.9);
+    this.scene.add(this.sun, this.ambient);
+    this.sky = createSky(SKY_RADIUS);
+    this.scene.add(this.sky.mesh);
+    this.pmrem = new PMREMGenerator(this.renderer);
+    const envSky = new Mesh(this.sky.mesh.geometry, this.sky.mesh.material);
+    envSky.frustumCulled = false;
+    envSky.renderOrder = this.sky.mesh.renderOrder;
+    this.envGround = new Mesh(new CircleGeometry(80, 48), new MeshBasicMaterial({ color: 0 }));
+    this.envGround.rotation.x = -Math.PI / 2;
+    this.envGround.position.y = -2;
+    this.envScene.add(envSky, this.envGround);
+    this.ocean = createOcean({ maxDist: FAR * 0.98 });
+    this.scene.add(this.ocean.mesh);
+    for (const g of Object.values(this.groups)) this.scene.add(g);
+    this.groups.gameTerrain.visible = false;
+    this.groups.props.visible = false;
+    this.scenePass = new SplitFrustumPass(
+      this.scene,
+      this.camera,
+      { near: NEAR, nearFar: NEAR_FAR, farNear: FAR_NEAR, far: FAR },
+      [this.sky.mesh]
+    );
+    this.setPost(ENGINEERING_POST);
+  }
+  /** Engineering ↔ Cinematic.
+   *
+   * 컴포저를 갈아 끼우고 궤적 오버레이를 숨긴다. **결과 선택·재생 커서·카메라는 그대로다**
+   * — 같은 런을 두 얼굴로 보는 것이다(계획 §8). 숨긴 것은 캡션이 말한다(컨트롤러 몫). */
+  setViewStyle(style) {
+    this.setPost(
+      style === "cinematic" ? CINEMATIC_POST : style === "game" ? GAME_POST : ENGINEERING_POST
+    );
+    this.groups.paths.visible = style === "engineering";
+    this.groups.runway.visible = style === "engineering" || style === "game";
+    this.groups.marks.visible = style === "engineering" || style === "game";
+    this.groups.terrain.visible = style !== "game";
+    this.groups.gameTerrain.visible = style === "game";
+    this.groups.props.visible = style === "game";
+    this.ocean.setPalette(style === "game");
+  }
+  /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
+  setPost(opts) {
+    this.post?.dispose();
+    this.post = createPost(this.renderer, this.scenePass, this.size.w, this.size.h, opts);
+    this.post.setSize(this.size.w, this.size.h, this.size.dpr);
+  }
+  resize(width, height, dpr) {
+    this.size = { w: width, h: height, dpr };
+    const ratio = Math.min(dpr, 2) * this.renderScale;
+    this.renderer.setPixelRatio(ratio);
+    this.renderer.setSize(width, height, false);
+    this.camera.aspect = width / Math.max(height, 1);
+    this.camera.updateProjectionMatrix();
+    this.post?.setSize(width, height, dpr * this.renderScale);
+  }
+  /** 렌더 배율 — 품질 자동 강등의 한 조정 파라미터.
+   *
+   * 픽셀 수를 배율²로 줄이므로 GPU 픽셀 비용(바다·구름·대기가 다 픽셀 셰이더다)에
+   * 정비례로 듣는다. 기하·걸음 수를 줄이는 것보다 이것 하나가 낫다: 셰이더 재컴파일이
+   * 없어 강등 자체가 프레임을 먹지 않고, 되돌리기도 즉시다. 값은 캡션이 말한다. */
+  setRenderScale(scale) {
+    const s = Math.min(Math.max(scale, 0.4), 1);
+    if (s === this.renderScale) return;
+    this.renderScale = s;
+    this.resize(this.size.w, this.size.h, this.size.dpr);
+  }
+  getRenderScale() {
+    return this.renderScale;
+  }
+  setEnvironment({ sunAzEl, visibility, exposure, sea, cloudCover }) {
+    const [az, el2] = sunAzEl;
+    const w2 = toWorld(Math.cos(el2) * Math.cos(az), Math.cos(el2) * Math.sin(az), -Math.sin(el2));
+    this.sunDirWorld.set(w2[0], w2[1], w2[2]);
+    const intensity = 2.4;
+    const sunColor = setAtmosphere(w2, el2, intensity, visibility);
+    this.sun.color.setRGB(sunColor[0], sunColor[1], sunColor[2]);
+    this.sun.intensity = intensity;
+    this.ambient.intensity = 0.12 + 0.8 * Math.max(Math.sin(el2), 0);
+    this.ocean.setSea(sea);
+    setClouds(cloudCover, [
+      sea.windSpeed * Math.cos(sea.windDir),
+      sea.windSpeed * Math.sin(sea.windDir)
+    ]);
+    this.renderer.toneMappingExposure = exposure;
+    const sky = 0.8 * this.ambient.intensity;
+    const lit = intensity * Math.max(Math.sin(el2), 0);
+    this.envGround.material.color.setRGB(
+      ENV_GROUND_ALBEDO[0] * (sunColor[0] * lit + sky) / Math.PI,
+      ENV_GROUND_ALBEDO[1] * (sunColor[1] * lit + sky) / Math.PI,
+      ENV_GROUND_ALBEDO[2] * (sunColor[2] * lit + sky) / Math.PI
+    );
+    this.envDirty = true;
+  }
+  /** NED 기하 → three 지오메트리 — NaN 정점 방어·축 변환·(있으면) 색 굽기를 한 곳에 둔다.
+   *  실사·게임 두 벌이 각자 돌면 언젠가 한쪽만 고쳐진다(disposeTree의 교훈). 실사 지형은
+   *  색을 셰이더가 정하므로(지표 피복) `colorAt`이 null이다. */
+  patchGeometry(p2, colorAt) {
+    const n2 = p2.positions.length;
+    const pos = new Float32Array(n2);
+    const nrm = new Float32Array(n2);
+    const col = colorAt ? new Float32Array(n2) : null;
+    for (let i = 0; i < n2; i += 3) {
+      const d = Number.isFinite(p2.positions[i + 2]) ? p2.positions[i + 2] : 0;
+      const w2 = toWorld(p2.positions[i], p2.positions[i + 1], d);
+      pos[i] = w2[0];
+      pos[i + 1] = w2[1];
+      pos[i + 2] = w2[2];
+      const nw = toWorld(p2.normals[i], p2.normals[i + 1], p2.normals[i + 2]);
+      nrm[i] = nw[0];
+      nrm[i + 1] = nw[1];
+      nrm[i + 2] = nw[2];
+      if (colorAt && col) colorAt(-d, col, i);
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new BufferAttribute(nrm, 3));
+    if (col) geo.setAttribute("color", new BufferAttribute(col, 3));
+    geo.setIndex(new BufferAttribute(p2.indices, 1));
+    return geo;
+  }
+  /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생기고, 그 위에
+   *  지표 피복·지형 자체 그림자·하늘 열림이 얹힌다(`shaders/ground.ts`). */
+  setTerrain(patches) {
+    disposeTree(this.groups.terrain);
+    this.setHeightTextures(patches);
+    for (const p2 of patches) {
+      const geo = this.patchGeometry(p2, null);
+      const shade = terrainShade(elevationsOf(p2), p2.rows, p2.cols, p2.step);
+      const attr = new Float32Array(p2.rows * p2.cols * 2);
+      for (let i = 0; i < p2.rows * p2.cols; i++) {
+        attr[2 * i] = shade.ao[i];
+        attr[2 * i + 1] = shade.convex[i];
+      }
+      geo.setAttribute("aTerrain", new BufferAttribute(attr, 2));
+      const mat = new MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
+      applyGroundDetail(mat, {
+        ...cloudUniforms,
+        ...atmosphereUniforms,
+        ...this.ocean.coastUniforms,
+        ...this.groundUniforms,
+        ...this.runwayUniforms
+      });
+      applyAerialPerspective(mat);
+      const pos = geo.getAttribute("position");
+      const box2 = new Box3();
+      const v2 = new Vector3();
+      for (const ch2 of chunkIndices(geo.getIndex().array, p2.cols, chunkQuads(p2.step))) {
+        box2.makeEmpty();
+        for (let k2 = 0; k2 < ch2.indices.length; k2++) box2.expandByPoint(v2.fromBufferAttribute(pos, ch2.indices[k2]));
+        const g = new BufferGeometry();
+        g.setAttribute("position", pos);
+        g.setAttribute("normal", geo.getAttribute("normal"));
+        g.setAttribute("aTerrain", geo.getAttribute("aTerrain"));
+        g.setIndex(new BufferAttribute(ch2.indices, 1));
+        g.boundingBox = box2.clone();
+        g.boundingSphere = box2.getBoundingSphere(new Sphere());
+        const mesh = new Mesh(g, mat);
+        mesh.receiveShadow = true;
+        this.groups.terrain.add(mesh);
+      }
+    }
+  }
+  /** 활주로 포장면 — 실사 지면과 게임 지형이 아스팔트·도색·과주로·비행장 풀밭을 칠한다(`shaders/runway.ts`).
+   *  null이면 안 칠한다 — 폭을 모르는 활주로에 포장면을 지어내지 않는다(`core/runway.ts`). */
+  setRunwaySurface(s) {
+    const u2 = this.runwayUniforms;
+    if (s == null) {
+      u2.uRunwayOn.value = 0;
+      return;
+    }
+    const v2 = runwayUniformValues(s);
+    u2.uRunway.value.set(...v2.runway);
+    u2.uRunwayArea.value.set(...v2.area);
+    u2.uRunwayNum.value.set(...v2.num);
+    u2.uRunwayDash.value.set(...v2.dash);
+    u2.uRunwayAim.value.set(...v2.aim);
+    u2.uRunwayOn.value = 1;
+  }
+  /** 표고 텍스처 — 가장 촘촘한 장과 가장 넓은 장을 반정밀도로 올린다(지형 자체 그림자용).
+   *
+   * 반정밀도인 이유: WebGL2에서 R16F는 선형 필터가 기본으로 되지만 R32F는 확장
+   * (`OES_texture_float_linear`)이 있어야 한다 — 없으면 최근접으로 떨어져 그림자에 30 m
+   * 계단이 선다. 1,000 m에서 간격이 0.5 m라 그림자 판정에는 충분하다. */
+  setHeightTextures(patches) {
+    for (const t2 of this.heightTextures) t2.dispose();
+    this.heightTextures = [];
+    const u2 = this.groundUniforms;
+    u2.uHeightOn.value = 0;
+    u2.uHeightFine.value = null;
+    u2.uHeightCoarse.value = null;
+    if (patches.length === 0) return;
+    const byStep = [...patches].sort((a, b) => a.step - b.step);
+    let top = 0;
+    const upload = (p2, xf2, size) => {
+      const n2 = p2.rows * p2.cols;
+      const data = new Uint16Array(n2);
+      for (let i = 0; i < n2; i++) {
+        const d = p2.positions[3 * i + 2];
+        const z2 = Number.isFinite(d) ? -d : 0;
+        if (z2 > top) top = z2;
+        data[i] = DataUtils.toHalfFloat(z2);
+      }
+      const tex = new DataTexture(data, p2.cols, p2.rows, RedFormat, HalfFloatType);
+      tex.minFilter = LinearFilter;
+      tex.magFilter = LinearFilter;
+      tex.wrapS = ClampToEdgeWrapping;
+      tex.wrapT = ClampToEdgeWrapping;
+      tex.unpackAlignment = 1;
+      tex.needsUpdate = true;
+      this.heightTextures.push(tex);
+      xf2.set(p2.positions[1], p2.positions[0], p2.step, 0);
+      size.set(p2.cols, p2.rows);
+      return tex;
+    };
+    u2.uHeightFine.value = upload(byStep[0], u2.uHFine.value, u2.uHFineSize.value);
+    const coarse = byStep[byStep.length - 1];
+    u2.uHeightCoarse.value = coarse === byStep[0] ? u2.uHeightFine.value : upload(coarse, u2.uHCoarse.value, u2.uHCoarseSize.value);
+    if (coarse === byStep[0]) {
+      u2.uHCoarse.value.copy(u2.uHFine.value);
+      u2.uHCoarseSize.value.copy(u2.uHFineSize.value);
+    }
+    u2.uTerrainTop.value = top;
+    u2.uHeightOn.value = 1;
+  }
+  /** 게임 모드 지형 — **같은 실측 표고**를 성긴 면 + 게임 램프로 다시 그린다.
+   *
+   * flatShading은 three가 프래그먼트 도함수로 낱면 법선을 만들므로 정점 법선을
+   * 그대로 둬도 큰 면이 선다. 지면 절차 무늬는 걸지 않는다 — 85 m 식생 얼룩이
+   * 90 m 낱면과 간섭해 "한 면 한 색"의 로우폴리 문법을 깬다. 활주로만은 칠한다 — 실사와
+   * 같은 자리·도색을 게임 색으로(`applyGameRunway`). 안 칠하면 게임 모드에서 활주로가
+   * 통째로 없다(사용자 지적). 대기 원근은 건다 — 안 걸면 이 지형만 수평선에서 하늘과 갈라진다. */
+  setGameTerrain(patches, relief) {
+    disposeTree(this.groups.gameTerrain);
+    for (const p2 of patches) {
+      const geo = this.patchGeometry(p2, (elev, out, i) => gameRamp(elev, relief, out, i));
+      const mat = new MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 1,
+        metalness: 0,
+        flatShading: true
+      });
+      applyGameRunway(mat, this.runwayUniforms);
+      applyAerialPerspective(mat);
+      const mesh = new Mesh(geo, mat);
+      mesh.receiveShadow = true;
+      this.groups.gameTerrain.add(mesh);
+    }
+  }
+  /** 게임 소품 그룹 교체 — null이면 비운다. 소유권은 이 그룹이 진다(disposeTree). */
+  setProps(group) {
+    disposeTree(this.groups.props);
+    if (group) this.groups.props.add(group);
+  }
+  /** 캔버스 NDC → 지면 교점 (NED). 게임 지형이 없으면 기준면 y=planeY와의 교점으로
+   *  물러선다. 하늘을 향하면 **null** — 0으로 메우면 지평선 클릭이 원점 웨이포인트를
+   *  지어낸다. 카메라 행렬은 마지막 render()의 것 — 게임 모드는 매 프레임 그린다. */
+  raycastGround(ndcX, ndcY, planeY) {
+    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
+    const hit = this.raycaster.intersectObjects(this.groups.gameTerrain.children, false)[0];
+    let p2 = hit?.point ?? null;
+    if (p2 == null) {
+      const r2 = this.raycaster.ray;
+      const t2 = (planeY - r2.origin.y) / r2.direction.y;
+      p2 = Number.isFinite(t2) && t2 > 0 ? r2.origin.clone().addScaledVector(r2.direction, t2) : null;
+    }
+    if (p2 == null) return null;
+    return [-p2.z, p2.x, -p2.y];
+  }
+  /** 궤적 — `breaks`의 양 끝 중 하나라도 결측이면 그 구간을 그리지 않는다.
+   *
+   * **NaN도 직접 막는다.** `breaks`는 선택 인자라, 그걸 안 주고 NaN이 섞인 점을 넘기면
+   * 바운딩 스피어가 NaN이 되어 **선 전체가 프러스텀 컬링으로 사라진다** —
+   * `setTerrain`이 같은 이유로 방어하는 그 함정이고, 원인이 전혀 안 보인다. */
+  setPaths(lines) {
+    this.fillLines(this.groups.paths, lines);
+  }
+  /** 활주로 선 — 지형이 없거나(도색할 땅이 없다) 폭을 모를 때의 선분들(`core/runway.ts`). 궤적과 따로 다는 것은
+   *  보이는 모드가 달라서다: 게임 모드는 궤적을 숨기지만 활주로는 보여야 한다. */
+  setRunwayLines(lines) {
+    this.fillLines(this.groups.runway, lines);
+  }
+  /** 선 목록 → 그룹 — 궤적·활주로 선이 같이 쓴다(결측 방어가 한 곳에 있게). */
+  fillLines(group, lines) {
+    disposeTree(group);
+    for (const ln of lines) {
+      const count = ln.points.length / 3;
+      if (count < 2) continue;
+      const broken = new Set(ln.breaks ?? []);
+      const ok2 = (k2) => !broken.has(k2) && Number.isFinite(ln.points[3 * k2]) && Number.isFinite(ln.points[3 * k2 + 1]) && Number.isFinite(ln.points[3 * k2 + 2]);
+      const verts = [];
+      for (let i = 0; i + 1 < count; i++) {
+        if (!ok2(i) || !ok2(i + 1)) continue;
+        for (const k2 of [i, i + 1]) {
+          const w2 = toWorld(ln.points[3 * k2], ln.points[3 * k2 + 1], ln.points[3 * k2 + 2]);
+          verts.push(w2[0], w2[1], w2[2]);
+        }
+      }
+      if (verts.length === 0) continue;
+      const geo = new BufferGeometry();
+      geo.setAttribute("position", new BufferAttribute(new Float32Array(verts), 3));
+      const mat = new LineBasicMaterial({ color: ln.color });
+      applyAerialPerspective(mat);
+      group.add(new LineSegments(geo, mat));
+    }
+  }
+  /** 표지 — 웨이포인트 기둥·포획원과 출발점. 옛 화면의 `setMarkers`와 같은 어휘다.
+   *
+   * 웨이포인트는 지점 자체가 아니라 **지점 + 포획 반경**이 유도의 사실이다 — 원이 없으면
+   * "지나갔는데 왜 잡혔지/안 잡혔지"를 화면이 설명하지 못한다. 고도가 없는 웨이포인트는
+   * 호출측이 활주로 표고를 넣어 준다(그 선택은 캡션 몫이 아니라 관례다 — 옛 화면과 같다). */
+  setMarkers(marks) {
+    disposeTree(this.groups.marks);
+    for (const m2 of marks) {
+      const w2 = toWorld(m2.ne[0], m2.ne[1], m2.ne[2]);
+      if (m2.kind === "start") {
+        const geo2 = new SphereGeometry(0.8, 12, 10);
+        const mesh = new Mesh(geo2, new MeshStandardMaterial({ color: 3458905, roughness: 0.7 }));
+        mesh.position.set(w2[0], w2[1], w2[2]);
+        this.groups.marks.add(mesh);
+        continue;
+      }
+      const seg = new Float32Array([w2[0], w2[1], w2[2], w2[0], w2[1] + 120, w2[2]]);
+      const geo = new BufferGeometry();
+      geo.setAttribute("position", new BufferAttribute(seg, 3));
+      this.groups.marks.add(new LineSegments(geo, new LineBasicMaterial({ color: 16749824 })));
+      if (m2.radius > 0) {
+        const n2 = 64;
+        const pts = new Float32Array(n2 * 6);
+        for (let i = 0; i < n2; i++) {
+          for (const [j, k2] of [[0, i], [1, (i + 1) % n2]]) {
+            const a = 2 * Math.PI * k2 / n2;
+            const c = toWorld(m2.ne[0] + m2.radius * Math.cos(a), m2.ne[1] + m2.radius * Math.sin(a), m2.ne[2]);
+            pts.set(c, i * 6 + j * 3);
+          }
+        }
+        const cg2 = new BufferGeometry();
+        cg2.setAttribute("position", new BufferAttribute(pts, 3));
+        this.groups.marks.add(new LineSegments(cg2, new LineBasicMaterial({
+          color: 16749824,
+          transparent: true,
+          opacity: 0.7
+        })));
+      }
+    }
+  }
+  /** 모델 그룹 — GLB 루트를 넣고 뺀다.
+   *
+   * **여기 넣은 것은 `dispose()`가 함께 파괴한다.** `models.ts`가 노드 핸들을 들고
+   * 있을 뿐 소유권은 이 그룹에 있다는 뜻이다. 장래에 GLTF를 모듈 수준으로 캐시하면
+   * (탭을 오갈 때 다시 안 받으려고) 그 캐시가 내주는 지오메트리를 여기가 파괴하게 되어
+   * 다음 SceneHost가 빈 메시를 받는다 — 캐시를 넣는다면 이 그룹에는 `clone()`을 넣어야 한다. */
+  get modelGroup() {
+    return this.groups.models;
+  }
+  /** 해안 거리장 — 결과가 바뀔 때. `null`이면 해면이 전부 열린 바다가 된다. */
+  setCoast(field) {
+    this.ocean.setCoast(field);
+  }
+  /** 지금의 해상 상태 — 캡션이 수치를 말한다. */
+  seaState() {
+    return this.ocean.describe();
+  }
+  /** @param timeSec 해면 위상에 쓸 시각 [s]. **시뮬 시각**을 넣는다 — 벽시계로 돌리면
+   *  멈춘 화면에서도 파도가 움직여야 하고, 그러면 온디맨드 렌더 루프가 무너진다. */
+  render(cam, timeSec) {
+    if (this.disposed || this.post == null) return;
+    const t0 = performance.now();
+    if (this.envDirty) {
+      this.envDirty = false;
+      this.envTarget?.dispose();
+      this.envTarget = this.pmrem.fromScene(this.envScene, 0, 0.1, 200);
+    }
+    setModelEnvironment(this.groups.models, this.envTarget?.texture ?? null, MODEL_ENV_INTENSITY);
+    const eye = toWorld(cam.eye[0], cam.eye[1], cam.eye[2]);
+    const target = toWorld(cam.target[0], cam.target[1], cam.target[2]);
+    const up = toWorld(cam.up[0], cam.up[1], cam.up[2]);
+    this.camera.position.set(eye[0], eye[1], eye[2]);
+    this.camera.up.set(up[0], up[1], up[2]).normalize();
+    this.camera.lookAt(new Vector3(target[0], target[1], target[2]));
+    this.camera.fov = cam.fovY * 180 / Math.PI;
+    this.sky.mesh.position.copy(this.camera.position);
+    this.sun.target.position.set(target[0], target[1], target[2]);
+    this.sun.position.set(
+      target[0] + this.sunDirWorld.x * 500,
+      target[1] + this.sunDirWorld.y * 500,
+      target[2] + this.sunDirWorld.z * 500
+    );
+    this.renderer.shadowMap.needsUpdate = true;
+    this.camera.near = NEAR;
+    this.camera.far = FAR;
+    this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld(true);
+    setCloudTime(timeSec);
+    this.ocean.setView(
+      this.camera.position,
+      this.gridInvViewProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).invert(),
+      timeSec,
+      cam.fovY,
+      this.camera.aspect
+    );
+    this.renderer.info.autoReset = false;
+    this.renderer.info.reset();
+    try {
+      this.post.render();
+    } finally {
+      this.renderer.info.autoReset = true;
+    }
+    const scene = this.post.sceneStats();
+    this.stats = { ...scene, ms: performance.now() - t0 };
+  }
+  getStats() {
+    return this.stats;
+  }
+  describe() {
+    const caps = this.renderer.capabilities;
+    const gl2 = this.renderer.getContext();
+    return {
+      name: "three WebGL2",
+      maxTextureSize: caps.maxTextureSize,
+      maxAnisotropy: caps.getMaxAnisotropy(),
+      // 깊이 정책의 전제다 — 24비트를 가정하고 분할 구간을 골랐다(위 주석의 실측표).
+      depthBits: gl2.getParameter(gl2.DEPTH_BITS)
+    };
+  }
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.post?.dispose();
+    this.post = null;
+    for (const g of Object.values(this.groups)) disposeTree(g);
+    for (const t2 of this.heightTextures) t2.dispose();
+    this.heightTextures = [];
+    this.envTarget?.dispose();
+    this.envTarget = null;
+    this.pmrem.dispose();
+    this.envGround.geometry.dispose();
+    this.envGround.material.dispose();
+    this.envScene.clear();
+    this.sky.dispose();
+    this.ocean.dispose();
+    this.scene.clear();
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
+  }
+}
+function createSceneHost(canvas) {
+  if (typeof WebGL2RenderingContext === "undefined") {
+    return { host: null, reason: "이 브라우저가 WebGL2를 지원하지 않습니다." };
+  }
+  const context = canvas.getContext("webgl2", { antialias: true });
+  if (context == null) {
+    return {
+      host: null,
+      reason: "WebGL2 컨텍스트를 만들지 못했습니다 — 하드웨어 가속이 꺼져 있거나 GPU가 차단된 환경일 수 있습니다."
+    };
+  }
+  try {
+    return { host: new SceneHost(canvas, context), reason: null };
+  } catch (e) {
+    return { host: null, reason: `렌더러를 만들지 못했습니다 — ${e.message}` };
+  }
+}
+const COAST_DEPTH = {
+  /** 첫 고리 수심 = 맞닿은 땅 높이 평균 × 이 값 */
+  firstRingGain: 0.8,
+  minM: 1,
+  maxFirstM: 15,
+  /** 고리마다 깊어지는 배율과 상한 */
+  ringGrowth: 1.6,
+  maxM: 30,
+  /** 내리는 고리 수 — 3차 보간의 지지 범위(4×4)가 닿는 데까지 */
+  rings: 3
+};
+function coastalDepths(elev, rows, cols, cells) {
+  const n2 = rows * cols;
+  const out = Float32Array.from(elev);
+  const ring = new Int8Array(n2);
+  let frontier = [];
+  for (let r2 = 0; r2 < rows; r2++) {
+    for (let c = 0; c < cols; c++) {
+      const i = r2 * cols + c;
+      if (cells[i] !== CELL.SEA) continue;
+      let sum = 0;
+      let k2 = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc2 = -1; dc2 <= 1; dc2++) {
+          if (!dr && !dc2) continue;
+          const rr = r2 + dr;
+          const cc2 = c + dc2;
+          if (rr < 0 || cc2 < 0 || rr >= rows || cc2 >= cols) continue;
+          const j = rr * cols + cc2;
+          if (cells[j] !== CELL.LAND) continue;
+          const z2 = elev[j];
+          if (!Number.isFinite(z2)) continue;
+          sum += Math.max(z2, 0);
+          k2++;
+        }
+      }
+      if (k2 === 0) continue;
+      const d = Math.min(Math.max(COAST_DEPTH.firstRingGain * (sum / k2), COAST_DEPTH.minM), COAST_DEPTH.maxFirstM);
+      out[i] = -d;
+      ring[i] = 1;
+      frontier.push(i);
+    }
+  }
+  for (let k2 = 2; k2 <= COAST_DEPTH.rings && frontier.length > 0; k2++) {
+    const next = /* @__PURE__ */ new Map();
+    for (const i of frontier) {
+      const r2 = i / cols | 0;
+      const c = i - r2 * cols;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc2 = -1; dc2 <= 1; dc2++) {
+          if (!dr && !dc2) continue;
+          const rr = r2 + dr;
+          const cc2 = c + dc2;
+          if (rr < 0 || cc2 < 0 || rr >= rows || cc2 >= cols) continue;
+          const j = rr * cols + cc2;
+          if (cells[j] !== CELL.SEA || ring[j] !== 0) continue;
+          const acc = next.get(j) ?? { sum: 0, n: 0 };
+          acc.sum += -out[i];
+          acc.n++;
+          next.set(j, acc);
+        }
+      }
+    }
+    frontier = [];
+    for (const [j, acc] of next) {
+      out[j] = -Math.min(COAST_DEPTH.ringGrowth * (acc.sum / acc.n), COAST_DEPTH.maxM);
+      ring[j] = k2;
+      frontier.push(j);
+    }
+  }
+  return out;
+}
+const REFINE_MIN_STEP_M = 60;
+const W = [-1 / 16, 9 / 16, 9 / 16, -1 / 16];
+function refineGrid(elev, rows, cols) {
+  const R2 = 2 * rows - 1;
+  const C2 = 2 * cols - 1;
+  const out = new Float32Array(R2 * C2);
+  const raw = (r2, c) => elev[r2 * cols + c];
+  const atCol = (r2, c) => {
+    if (cols === 1) return raw(r2, 0);
+    if (c < 0) return 2 * raw(r2, 0) - raw(r2, 1);
+    if (c >= cols) return 2 * raw(r2, cols - 1) - raw(r2, cols - 2);
+    return raw(r2, c);
+  };
+  const at = (r2, c) => {
+    if (rows === 1) return atCol(0, c);
+    if (r2 < 0) return 2 * atCol(0, c) - atCol(1, c);
+    if (r2 >= rows) return 2 * atCol(rows - 1, c) - atCol(rows - 2, c);
+    return atCol(r2, c);
+  };
+  for (let i = 0; i < R2; i++) {
+    const r0 = i >> 1;
+    const oddR = (i & 1) === 1;
+    for (let j = 0; j < C2; j++) {
+      const c0 = j >> 1;
+      const oddC = (j & 1) === 1;
+      const k2 = i * C2 + j;
+      if (!oddR && !oddC) {
+        out[k2] = at(r0, c0);
+        continue;
+      }
+      const corners = !oddR ? [at(r0, c0), at(r0, c0 + 1)] : !oddC ? [at(r0, c0), at(r0 + 1, c0)] : [at(r0, c0), at(r0, c0 + 1), at(r0 + 1, c0), at(r0 + 1, c0 + 1)];
+      let lo = Infinity;
+      let hi2 = -Infinity;
+      let mean = 0;
+      let cornersOk = true;
+      for (const v22 of corners) {
+        if (!Number.isFinite(v22)) {
+          cornersOk = false;
+          break;
+        }
+        lo = Math.min(lo, v22);
+        hi2 = Math.max(hi2, v22);
+        mean += v22 / corners.length;
+      }
+      if (!cornersOk) {
+        out[k2] = Number.NaN;
+        continue;
+      }
+      let v2 = 0;
+      let ok2 = true;
+      if (!oddR) {
+        for (let t2 = 0; t2 < 4 && ok2; t2++) {
+          const s = at(r0, c0 - 1 + t2);
+          ok2 = Number.isFinite(s);
+          v2 += W[t2] * s;
+        }
+      } else if (!oddC) {
+        for (let t2 = 0; t2 < 4 && ok2; t2++) {
+          const s = at(r0 - 1 + t2, c0);
+          ok2 = Number.isFinite(s);
+          v2 += W[t2] * s;
+        }
+      } else {
+        for (let a = 0; a < 4 && ok2; a++) {
+          let row = 0;
+          for (let b = 0; b < 4 && ok2; b++) {
+            const s = at(r0 - 1 + a, c0 - 1 + b);
+            ok2 = Number.isFinite(s);
+            row += W[b] * s;
+          }
+          v2 += W[a] * row;
+        }
+      }
+      out[k2] = ok2 ? Math.min(Math.max(v2, lo), hi2) : mean;
+    }
+  }
+  return { elev: out, rows: R2, cols: C2 };
+}
+function seaQuad(mask) {
+  const at = (r2, c) => mask.cells[r2 * mask.cols + c];
+  return (r0, c0, r1, c1) => {
+    for (let r2 = r0; r2 <= r1; r2++) {
+      for (let c = c0; c <= c1; c++) {
+        if (at(r2, c) !== CELL.SEA) return false;
+      }
+    }
+    return true;
+  };
+}
+function tierElevations(tier) {
+  const elev = new Float32Array(tier.rows * tier.cols);
+  for (let i = 0; i < elev.length; i++) {
+    const v2 = tier.raw[i];
+    elev[i] = v2 === tier.nodata ? Number.NaN : tier.offset + v2 * tier.scale;
+  }
+  return elev;
+}
+function quantize(tier, z2) {
+  return Number.isFinite(z2) ? Math.min(Math.max(Math.round((z2 - tier.offset) / tier.scale), 0), tier.nodata - 1) : tier.nodata;
+}
+function inlandLand(mask) {
+  const { rows, cols, cells } = mask;
+  return (i) => {
+    if (cells[i] !== CELL.LAND) return false;
+    const r2 = i / cols | 0;
+    const c = i - r2 * cols;
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc2 = -1; dc2 <= 1; dc2++) {
+        const rr = r2 + dr;
+        const cc2 = c + dc2;
+        if (rr >= 0 && cc2 >= 0 && rr < rows && cc2 < cols && cells[rr * cols + cc2] === CELL.SEA) return false;
+      }
+    }
+    return true;
+  };
+}
+function byStepAsc(a, b) {
+  return a.step - b.step;
+}
+function boundingRect(rects) {
+  if (rects.length === 0) return null;
+  let { n0, e0, n1, e1 } = rects[0];
+  for (const r2 of rects.slice(1)) {
+    n0 = Math.min(n0, r2.n0);
+    e0 = Math.min(e0, r2.e0);
+    n1 = Math.max(n1, r2.n1);
+    e1 = Math.max(e1, r2.e1);
+  }
+  return { n0, e0, n1, e1 };
+}
+function renderTier(tier, mask, refine, floor = null) {
+  let elev = tierElevations(tier);
+  if (mask) elev = coastalDepths(elev, tier.rows, tier.cols, mask.cells);
+  if (floor) {
+    elev = floorGrid(
+      elev,
+      tier.rows,
+      tier.cols,
+      tier.n0,
+      tier.e0,
+      tier.step,
+      floor,
+      mask ? inlandLand(mask) : void 0
+    ).elev;
+  }
+  const doRefine = refine && tier.step >= REFINE_MIN_STEP_M && tier.rows > 1 && tier.cols > 1;
+  let rows = tier.rows;
+  let cols = tier.cols;
+  let step2 = tier.step;
+  if (doRefine) {
+    const g = refineGrid(elev, rows, cols);
+    elev = g.elev;
+    rows = g.rows;
+    cols = g.cols;
+    step2 = tier.step / 2;
+  }
+  const raw = new Uint16Array(rows * cols);
+  for (let i = 0; i < raw.length; i++) raw[i] = quantize(tier, elev[i]);
+  const out = { ...tier, rows, cols, step: step2, raw };
+  if (!mask) return { tier: out, skipCell: null, refined: doRefine };
+  const sea = seaQuad(mask);
+  return {
+    tier: out,
+    // 세분 격자 (r, c) → 원래 격자 (r/2, c/2). 세분한 칸은 원래 칸 하나 안에 들므로 내림·올림이 그 칸이다.
+    skipCell: doRefine ? (r0, c0, r1, c1) => sea(r0 >> 1, c0 >> 1, r1 + 1 >> 1, c1 + 1 >> 1) : sea,
+    refined: doRefine
+  };
+}
+function groundTier(tier, mask, floor) {
+  const src = tierElevations(tier);
+  const g = floorGrid(
+    src,
+    tier.rows,
+    tier.cols,
+    tier.n0,
+    tier.e0,
+    tier.step,
+    floor,
+    mask ? inlandLand(mask) : void 0
+  );
+  if (g.touched === 0) return tier;
+  const raw = Uint16Array.from(tier.raw);
+  for (let i = 0; i < raw.length; i++) {
+    if (Number.isFinite(src[i]) && g.elev[i] !== src[i]) raw[i] = quantize(tier, g.elev[i]);
+  }
+  return { ...tier, raw };
+}
+const m1 = (v2) => String(Number(v2.toFixed(1)));
+function buildTerrain(pack, opts = {}) {
+  const masks = buildSeaMasks(pack.tiers);
+  const inner = [...pack.tiers].sort(byStepAsc);
+  const meshes = [];
+  const notes = [];
+  let anyRefined = false;
+  const want = opts.floor ?? null;
+  let floorSrc = null;
+  if (want) {
+    for (const tier of inner) {
+      const mask = masks.get(tier.name);
+      floorSrc = floorSource(
+        tierElevations(tier),
+        tier.rows,
+        tier.cols,
+        tier.n0,
+        tier.e0,
+        tier.step,
+        want,
+        mask ? inlandLand(mask) : void 0
+      );
+      if (floorSrc) break;
+    }
+  }
+  const floor = want && floorFits(want, floorSrc) ? want : null;
+  for (let i = 0; i < inner.length; i++) {
+    const tier = inner[i];
+    const mask = masks.get(tier.name);
+    const skipRect = boundingRect(inner.slice(0, i).map(tierRect));
+    const rt = renderTier(tier, mask, opts.refine ?? true, floor);
+    anyRefined ||= rt.refined;
+    meshes.push(buildTerrainMesh(rt.tier, {
+      stride: opts.strideFor?.(rt.tier) ?? 1,
+      skipRect,
+      skipCell: rt.skipCell
+    }));
+    const mesh = meshes[meshes.length - 1];
+    if (mesh.triangles === 0) {
+      notes.push(`${tier.name}: 안쪽 티어에 가려 그리지 않았습니다.`);
+    } else if (mask) {
+      const n2 = mask.rows * mask.cols;
+      notes.push(
+        `${tier.name}: ${tier.step} m 격자${rt.refined ? `(그릴 때 ${rt.tier.step} m로 세분)` : ""} · 바다 ${(100 * mask.seaCells / n2).toFixed(0)}%` + (mask.missingCells > 0 ? ` · 결측 ${(100 * mask.missingCells / n2).toFixed(1)}%(구멍으로 둡니다)` : "")
+      );
+    }
+  }
+  const cited = pack.tiers.find((t2) => t2.source);
+  if (cited?.source) {
+    const res = cited.source_res_m;
+    notes.push(`지형 출처: ${cited.source}${res ? ` (약 ${res.toFixed(0)} m/px)` : ""}`);
+  }
+  notes.push(
+    "해안선은 표고 0의 **경계 연결 성분**으로 판정했습니다 — 해수면 높이의 간척지·저지대는 육지로 남습니다. 표고만으로는 활주로와 먼바다를 가릴 수 없습니다."
+  );
+  const cl2 = pack.cleaning;
+  const needles = cl2?.per_stage?.reduce((a, b) => a + b, 0);
+  if (cl2 == null || typeof needles !== "number") {
+    notes.push("이 지형 팩은 첨탑 정리 전에 구웠습니다 — 만·해안에 바늘 같은 첨탑이 보이면 scripts/terrain/build_terrain.py로 다시 구우십시오.");
+  } else if (typeof cl2.spires_px !== "number") {
+    notes.push(`원자료 첨탑 정리(1차): 물 위에 튄 표고 ${needles}픽셀을 이웃 중앙값으로 바꿨습니다. 해안의 낮은 원뿔·벽은 이 팩에 남아 있습니다 — scripts/terrain/build_terrain.py로 다시 구우십시오.`);
+  } else {
+    notes.push(`원자료 정리: 물 위 바늘 ${needles}픽셀, 1픽셀 벽·도랑 ${cl2.walls_px ?? 0}, 평지·바다 위 좁은 기둥 ${cl2.spires_px}, 그 둘레 해안 잡음 지대 ${cl2.zone_px ?? 0}픽셀을 다듬었습니다 — 산지와 폭 95 m 넘는 섬은 건드리지 않습니다.`);
+  }
+  notes.push(
+    "지형 색은 꼴(경사·표고·볼록도·해안 거리)로 판정한 지표 피복 — 논밭·숲·마을·갯벌·암반 — 의 절차 무늬이며 영상지도가 아닙니다. 필지·지붕·나무 하나하나는 표시용이고 실제 지표 피복이 아닙니다. 해안 둘레 바다의 낮은 턱(원자료가 얕은 바다를 거친 표고로 메운 자리)은 갯벌로 칠합니다."
+  );
+  notes.push(
+    "물가선은 바다 쪽 첫 세 칸을 물속으로 이어 내려(땅 높이에 비례한 1~30 m의 표시용 수심 — 실제 수심이 아닙니다) 격자 꼭짓점의 톱니 대신 높이를 따라 그립니다." + (anyRefined ? " 외곽 격자는 그릴 때 3차 보간으로 두 배 촘촘히 해 작은 언덕을 둥글게 그립니다(원래 표본 범위를 넘지 않게 자릅니다). 둘 다 그림에만 들어가고 지면 높이 판독은 원자료 격자를 씁니다." : " 이것은 그림에만 들어가고 지면 높이 판독은 원자료 격자를 씁니다.")
+  );
+  if (want) {
+    notes.push(floor && floorSrc ? `활주로 바닥: 축 양옆 ${RUNWAY_FLOOR.halfWidthM} m·양 끝 너머 ${RUNWAY_FLOOR.endM} m를 활주로 표고 ${m1(floor.elevation)} m로 평평하게 그리고, 바깥 ${RUNWAY_FLOOR.blendM} m에서 원자료로 이었습니다 — 원자료는 이 구역에서 ${m1(floorSrc.min)}~${m1(floorSrc.max)} m로 출렁입니다(표고 자료의 오차 수준). 시뮬은 땅을 활주로 표고의 평면으로 계산하므로, 펴지 않으면 멈춘 기체가 솟은 지면에 묻힙니다. 이 구역에서는 지면 높이 판독도 편 높이를 씁니다(바다에 맞닿은 땅은 펴지 않습니다).` : floorSrc ? `활주로 바닥: 활주로 표고 ${m1(want.elevation)} m가 그 자리 지형(${m1(floorSrc.min)}~${m1(floorSrc.max)} m)에서 ${FLOOR_FIT_M} m 넘게 벗어나 펴지 않았습니다 — 펴면 없는 둑이나 구덩이를 짓게 됩니다. 시뮬은 땅을 활주로 표고의 평면으로 계산하므로 지상의 기체가 그만큼 떠 보이거나 묻혀 보이고, 지면 높이 판독도 원자료 그대로입니다.` : "활주로 바닥: 지형이 활주로 자리를 덮지 않아 펴지 않았습니다.");
+  }
+  notes.push(
+    "산그늘은 표고 격자를 태양 쪽으로 훑어 그리고(격자 30·90 m만큼 무디며, 걸음 사이의 좁은 능선은 놓칠 수 있습니다), 골짜기의 어둑함은 반경 60·180·540 m의 상대 표고로 어림한 하늘 열림입니다 — 둘 다 표시용 근사입니다."
+  );
+  const groundTiers = floor ? pack.tiers.map((t2) => groundTier(t2, masks.get(t2.name), floor)) : pack.tiers;
+  return { meshes, masks, notes, floor, groundTiers, runwayCovered: floorSrc !== null };
 }
 const CG_AT_ROOT_CHORD = 0.4;
 const THICK = 0.06;
@@ -47969,7 +47778,6 @@ class SceneController {
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model, CLOUD_NOTES.shadows);
-    if (this.vehicleKind === "model" || this.launcher) notes.push(WEAR_NOTES.model);
     const scale = this.host.getRenderScale();
     if (scale < 1) {
       notes.push(

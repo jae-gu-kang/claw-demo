@@ -40,7 +40,7 @@ export function schematicObject(mesh: SchematicMesh): Mesh {
  *
  * **몰 노드가 없다** — `nodes`가 비어 `applySurfaces`·`spinPropeller`는 그냥 지나가고, `missing`도 비운다(기대한 적
  * 없는 노드를 "못 찾았다"고 캡션에 싣지 않는다). 움직이지 않는 사실은 캡션(`SCHEMATIC_NOTE`)이 말한다.
- * 대기 산란은 GLB처럼 건다 — 빠뜨리면 먼 도식만 또렷해 오려 붙인 것처럼 보인다. 마모는 걸지 않는다(도식은 도장이 아니다). */
+ * 대기 산란은 GLB처럼 건다 — 빠뜨리면 먼 도식만 또렷해 오려 붙인 것처럼 보인다. */
 export function schematicVehicle(mesh: SchematicMesh): LoadedModel {
   const obj = schematicObject(mesh);
   for (const m of obj.material as Material[]) applyAerialPerspective(m);
