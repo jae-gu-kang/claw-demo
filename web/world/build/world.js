@@ -39850,6 +39850,33 @@ function propellerRate(thrL, thrR, maxRadPerSec = 220) {
   const mean = Math.min(Math.max((l2 + r2) / 2, 0), 1);
   return mean * maxRadPerSec;
 }
+const SKID_DEPLOY_LEAD_S = 20;
+const SKID_DEPLOY_S = 4;
+function parseStow(declared) {
+  let obj = declared;
+  if (typeof obj === "string") {
+    try {
+      obj = JSON.parse(obj);
+    } catch {
+      return [];
+    }
+  }
+  if (obj == null || typeof obj !== "object" || Array.isArray(obj)) return [];
+  const out = [];
+  for (const [node, v2] of Object.entries(obj)) {
+    if (!Array.isArray(v2) || v2.length !== 3) continue;
+    if (!v2.every((a) => typeof a === "number" && Number.isFinite(a))) continue;
+    out.push({ node, rot: [v2[0], v2[1], v2[2]] });
+  }
+  return out;
+}
+function stowFraction(t2, startsInCanister2, touchdownT) {
+  if (!startsInCanister2) return 0;
+  if (touchdownT == null || !Number.isFinite(touchdownT) || !Number.isFinite(t2)) return 1;
+  const u2 = Math.min(Math.max((t2 - (touchdownT - SKID_DEPLOY_LEAD_S)) / SKID_DEPLOY_S, 0), 1);
+  return 1 - u2 * u2 * (3 - 2 * u2);
+}
+const STOW_NOTE = `착륙 스키드는 표시용으로 접고 폅니다 — 관에서 발사하는 결과면 관 안·비행 중엔 접어 두었다가 접지 ${SKID_DEPLOY_LEAD_S}초 전에 폅니다(시뮬의 스키드 접촉점은 처음부터 있습니다).`;
 const G = 9.80665;
 function significantWaveHeight(windSpeed) {
   const u2 = Math.max(windSpeed, 0);
@@ -46255,6 +46282,32 @@ function spinPropeller(model, rate, dt) {
   disc.visible = a > 0.01;
   n2.visible = a < 1;
 }
+function stowOf(model) {
+  const cached = model.root.userData.clawStow;
+  if (cached) return cached;
+  let declared;
+  model.root.traverse((o) => {
+    if (declared === void 0 && o.userData?.claw_stow !== void 0) declared = o.userData.claw_stow;
+  });
+  const out = [];
+  for (const entry of parseStow(declared)) {
+    const node = model.root.getObjectByName(entry.node);
+    if (node) out.push({ entry, node });
+  }
+  model.root.userData.clawStow = out;
+  return out;
+}
+function hasStow(model) {
+  return model != null && stowOf(model).length > 0;
+}
+function applyStow(model, stowed) {
+  const list = stowOf(model);
+  for (const { entry, node } of list) {
+    const rest = node.userData.restRot ?? (node.userData.restRot = [node.rotation.x, node.rotation.y, node.rotation.z]);
+    node.rotation.set(rest[0] + stowed * entry.rot[0], rest[1] + stowed * entry.rot[1], rest[2] + stowed * entry.rot[2]);
+  }
+  return list.length > 0;
+}
 function applyLauncher(model, pose2) {
   if (pose2 == null) return false;
   const t2 = model.nodes.get("Turntable");
@@ -47469,6 +47522,10 @@ class SceneController {
   doorsOn = false;
   /** 발사 전주 시각 [s, 0…PRELUDE_S] — 처음부터 재생할 때 시뮬 시각 0에 머물며 문을 연다. PRELUDE_S면 끝났다. */
   preT = PRELUDE_S;
+  /** 관에서 발사하는 결과인가 — 그러면 착륙 스키드를 관 안·비행 중 접고 접지 전에 편다(core/stow.ts). */
+  stowAtStart = false;
+  /** 첫 접지 시각 [s] — 결과 `meta.phases.touchdown_t`. 없으면 null(내내 접힘). */
+  touchdownT = null;
   // ---- 게임 모드 상태 — 정본은 컨트롤러다(시점·재생과 같은 사유).
   arcade = null;
   gameInput = { turn: 0, pitch: 0, throttle: 0 };
@@ -47779,6 +47836,8 @@ class SceneController {
       this.doorsOn = false;
     }
     this.preT = this.doorsOn ? 0 : PRELUDE_S;
+    this.stowAtStart = lp != null && startsInCanister(body.signals.on_rail?.[0]);
+    this.touchdownT = num(body.meta?.phases?.touchdown_t);
     this.dist = Math.max(sceneExtent(body.signals) * 0.25, 200);
     this.resultNotes = notes;
     this.emitNotes();
@@ -47794,6 +47853,7 @@ class SceneController {
       const head = this.vehicleLoading === "doc" ? ["기체 문서를 받는 중… — 지금 보이는 모델은 앞서 얹은 것이고, 문서가 오면 그 문서의 표시 모델로 맞춥니다."] : this.vehicleCaption ? [this.vehicleCaption] : [];
       if (this.vehicleKind === "schematic") return [...head, SCHEMATIC_NOTE];
       const out = [...head, ...surfaceDisplayNotes(new Set(this.vehicle.nodes.keys()))];
+      if (hasStow(this.vehicle)) out.push(STOW_NOTE);
       if (this.vehicle.missing.length > 0) {
         out.push(`모델에서 못 찾은 노드: ${this.vehicle.missing.join(", ")} — 그 부분은 움직이지 않습니다.`);
       }
@@ -48152,6 +48212,7 @@ class SceneController {
     const axes = q2 ? bodyAxesNed(q2) : null;
     if (this.vehicle) {
       if (axes) setVehiclePose(this.vehicle, a.pos, axes, MODEL_SCALE);
+      applyStow(this.vehicle, 0);
       const thr = 0.5 + 0.5 * this.gameInput.throttle;
       spinPropeller(this.vehicle, propellerRate(thr, thr), dtWall);
     }
@@ -48217,6 +48278,7 @@ class SceneController {
     const cam = this.cameraFor(pos, q2, dtWall, groundElev);
     const t2 = body.t[i];
     if (typeof t2 === "number" && Number.isFinite(t2)) this.lastSeaTime = t2;
+    if (this.vehicle) applyStow(this.vehicle, stowFraction(this.lastSeaTime, this.stowAtStart, this.touchdownT));
     this.host.render(cam, this.lastSeaTime);
     this.emitReadout(i, groundElev);
     this.emitStats(performance.now());

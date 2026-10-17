@@ -28,6 +28,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { BodyAxes, Vec3 } from "../lib/attitude.ts";
 import { modelColumnsNed } from "../core/modelaxes.ts";
 import { doorRotations, type LauncherPose } from "../core/launcher.ts";
+import { parseStow, type StowEntry } from "../core/stow.ts";
 import { driveNodesFor, surfaceNodeRotations, type SurfacePose } from "../core/surfaces.ts";
 import { applyAerialPerspective } from "./atmosphere.ts";
 import { disposeTree } from "./dispose.ts";
@@ -233,6 +234,40 @@ export function spinPropeller(model: LoadedModel, rate: number | null, dt: numbe
   (disc.material as MeshBasicMaterial).opacity = a * 0.38;
   disc.visible = a > 0.01;
   n.visible = a < 1;
+}
+
+/** 모델이 선언한 접는 노드(루트 extras `claw_stow`) — 처음 한 번 읽어 모델에 붙여 둔다. 판단은 `core/stow.ts`. */
+function stowOf(model: LoadedModel): { entry: StowEntry; node: Object3D }[] {
+  const cached = model.root.userData.clawStow as { entry: StowEntry; node: Object3D }[] | undefined;
+  if (cached) return cached;
+  let declared: unknown;
+  model.root.traverse((o) => {
+    if (declared === undefined && o.userData?.claw_stow !== undefined) declared = o.userData.claw_stow;
+  });
+  const out: { entry: StowEntry; node: Object3D }[] = [];
+  for (const entry of parseStow(declared)) {
+    const node = model.root.getObjectByName(entry.node);
+    if (node) out.push({ entry, node });
+  }
+  model.root.userData.clawStow = out;
+  return out;
+}
+
+/** 접을 노드가 있는 모델인가 — 캡션이 표시용임을 밝힐지 정한다. */
+export function hasStow(model: LoadedModel | null): boolean {
+  return model != null && stowOf(model).length > 0;
+}
+
+/** 접힘(1)…펼침(0)을 선언한 노드에 싣는다 — 쉬는 자세(= 펼침, 기체 문서의 접촉점 자리)를 한 번 기억하고 그 위에
+ *  선언한 회전 × 접힘을 더한다(매 프레임 더해 쌓이지 않게). 접을 노드가 없으면 false. */
+export function applyStow(model: LoadedModel, stowed: number): boolean {
+  const list = stowOf(model);
+  for (const { entry, node } of list) {
+    const rest = (node.userData.restRot
+      ?? (node.userData.restRot = [node.rotation.x, node.rotation.y, node.rotation.z])) as [number, number, number];
+    node.rotation.set(rest[0] + stowed * entry.rot[0], rest[1] + stowed * entry.rot[1], rest[2] + stowed * entry.rot[2]);
+  }
+  return list.length > 0;
 }
 
 /** 발사관 관절 — 방위·고각·아웃리거. 자세를 모르면 **적용하지 않고 false**를 낸다.

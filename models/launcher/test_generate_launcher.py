@@ -181,7 +181,10 @@ def test_cradle_underside_clears_the_fenders(glb):
 # ---------------------------------------------------------------- 포구 문
 # 크래들 로컬(glTF): 포구 면 z = −3.50, 포구 테 앞면 −3.535(+ 볼트 머리). 관 개구 반폭 1.32·반높이 0.42.
 MUZZLE_FACE = -3.50
-FACE_CLEAR = -3.54           # 문은 어떤 각에서도 이보다 앞(더 음수)에 있다 — 포구 테·볼트 머리를 긁지 않는다
+# 문은 어떤 각에서도 이보다 앞(더 음수)에 있다 — 포구 테 앞면(−3.535)보다 5 mm 앞. 포구 테 볼트 머리(−3.547까지)는 닫힌 문의
+# 뒷면 패킹(−3.542)과 같은 깊이대지만 옆으로 6 mm 떨어져 있다 — 그 옆 거리와 몸통 경첩 받침과의 여유는 이 시험이 재지 않는다
+# (v2.01 리뷰가 방위 ±100°·고각 0/15°에서 따로 확인했다).
+FACE_CLEAR = -3.54
 TUBE_HX, TUBE_HY = 1.32, 0.42
 
 
@@ -206,11 +209,31 @@ def test_doors_hang_on_the_cradle_and_close_the_muzzle(glb):
     assert glb.node("Door_R")["translation"][0] > TUBE_HX and glb.node("Door_L")["translation"][0] < -TUBE_HX
     shut = _door_points(glb, "Door_L", 0.0) + _door_points(glb, "Door_R", 0.0)
     assert max(p[2] for p in shut) <= FACE_CLEAR                       # 포구 면 앞
-    # 두 짝이 만나는 틈(가운데)을 빼고 개구 폭·높이를 덮는다
-    xs = sorted(p[0] for p in shut)
-    assert xs[0] <= -TUBE_HX and xs[-1] >= TUBE_HX
-    assert min(p[1] for p in shut) <= -TUBE_HY and max(p[1] for p in shut) >= TUBE_HY
-    assert max(min(abs(p[0]) for p in _door_points(glb, n, 0.0)) for n in ("Door_L", "Door_R")) < 0.02
+    # 개구를 **면으로** 덮는다 — 범위만 보면 경첩 마디만으로도 통과한다(v2.01 리뷰). 포구 면과 나란한 문짝 면(앞·뒷면·테)의
+    # 삼각형을 xy로 눕혀, 개구 위 격자점 하나하나가 그 안에 드는지 본다. 가운데 맞닿는 틈(1.2 cm)만 뺀다.
+    flat = []
+    for name in ("Door_L", "Door_R"):
+        t = glb.node(name)["translation"]
+        for tri in glb.triangles(name):
+            if max(p[2] for p in tri) - min(p[2] for p in tri) < 1e-4:
+                flat.append([(p[0] + t[0], p[1] + t[1]) for p in tri])
+    bins = {}
+    for tri in flat:
+        lo, hi = min(p[0] for p in tri), max(p[0] for p in tri)
+        for b in range(math.floor(lo * 10), math.floor(hi * 10) + 1):
+            bins.setdefault(b, []).append(tri)
+
+    def covered(x, y):
+        for (ax, ay), (bx, by), (cx, cy) in bins.get(math.floor(x * 10), []):
+            d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by)
+            d2 = (x - cx) * (by - cy) - (bx - cx) * (y - cy)
+            d3 = (x - ax) * (cy - ay) - (cx - ax) * (y - ay)
+            if not ((d1 < -1e-12 or d2 < -1e-12 or d3 < -1e-12) and (d1 > 1e-12 or d2 > 1e-12 or d3 > 1e-12)):
+                return True
+        return False
+    holes = [(x / 100, y / 100) for x in range(-130, 131, 5) for y in range(-40, 41, 5)
+             if abs(x) > 1 and not covered(x / 100, y / 100)]
+    assert not holes, holes[:5]
 
 
 def test_doors_swing_clear_of_the_canister_face(glb):

@@ -401,25 +401,137 @@ def test_rudder_sweeps_clear_of_wing_fin_and_elevons(name, tag):
     assert _rudder_sweep_clearance(load(name), tag) >= 0.002
 
 
-def _skid_contacts():
-    with open(DELTA_DEMO, encoding="utf-8") as f:
-        return json.load(f)["ground"]["skid"]["contacts"]
+EXAMPLES = os.path.join(HERE, "..", "..", "engine", "claw", "profile", "examples")
+SKID_NODES = ("Skid_L", "Skid_R")
+WORLD = os.path.join(HERE, "..", "..", "web", "world", "src")
+LAUNCHER_GLB = os.path.join(HERE, "..", "launcher", "launcher.glb")
+
+
+def _shahed_docs():
+    """이 GLB를 표시 모델로 쓰는 예제 기체 문서 전부 — 스키드 접촉점·발사 레일은 문서마다 따로 적힌다."""
+    out = []
+    for f in sorted(os.listdir(EXAMPLES)):
+        if f.endswith(".json"):
+            with open(os.path.join(EXAMPLES, f), encoding="utf-8") as fh:
+                doc = json.load(fh)
+            if (doc.get("display") or {}).get("model") == "shahed136.glb":
+                out.append(doc)
+    assert out, "shahed136.glb를 쓰는 예제 문서가 없다"
+    return out
+
+
+def _euler_xyz(e, v):
+    """three Euler 'XYZ'(라디안)로 벡터 회전 — 행렬 Rx·Ry·Rz를 v에 곱한다(three Matrix4.makeRotationFromEuler)."""
+    x, y, z = v
+    c, s_ = math.cos(e[2]), math.sin(e[2])
+    x, y = c * x - s_ * y, s_ * x + c * y
+    c, s_ = math.cos(e[1]), math.sin(e[1])
+    x, z = c * x + s_ * z, -s_ * x + c * z
+    c, s_ = math.cos(e[0]), math.sin(e[0])
+    y, z = c * y - s_ * z, s_ * y + c * z
+    return (x, y, z)
+
+
+def _stow(g):
+    """루트 extras `claw_stow` — 접을 노드 → 접힌 자세의 회전(three Euler XYZ, 쉬는 자세 = 펼침에 더한다)."""
+    roots = [n for n in g.nodes if "extras" in n and "claw_stow" in n["extras"]]
+    assert len(roots) == 1, "claw_stow 선언이 루트 하나에 있어야 한다"
+    return json.loads(roots[0]["extras"]["claw_stow"])
+
+
+def _world_points(g, name, euler=None):
+    """노드 정점을 기체 원점 기준으로 — euler가 있으면 노드 원점(힌지) 둘레로 먼저 돌린다."""
+    o = g.offset(name)
+    pts = g.positions(name)
+    if euler is not None:
+        pts = [_euler_xyz(euler, p) for p in pts]
+    return [(o[0] + x, o[1] + y, o[2] + z) for x, y, z in pts]
+
+
+def _mesh_nodes(g):
+    return [n["name"] for n in g.nodes if "mesh" in n]
 
 
 @pytest.mark.parametrize("name", ["shahed136.glb", "shahed136_eoir.glb"])
 def test_landing_skids_touch_down_at_the_profile_contacts(name):
-    # 예제 기체 문서(delta_demo.json — 두 GLB의 기체)의 스키드 접촉점(FRD, CG 기준)이 시뮬의 접지점이다. 화면의
-    # 스키드 바닥이 그 자리에 있어야 착지·활주에서 기체가 땅에 떠 있거나 묻히지 않는다. 모델 원점 = CG.
+    # 이 GLB를 쓰는 예제 문서(delta_demo·showcase_delta)의 스키드 접촉점(FRD, CG 기준)이 시뮬의 접지점이다. 화면의
+    # 스키드 바닥이 — **펼친 자세(쉬는 자세)에서** — 그 자리에 있어야 착지·활주에서 기체가 땅에 떠 있거나 묻히지 않는다.
     g = load(name)
-    assert g.parent_of("Landing_Skids") == "Fuselage"
-    o = g.offset("Landing_Skids")
-    pts = [(o[0] + x, o[1] + y, o[2] + z) for x, y, z in g.positions("Landing_Skids")]
-    contacts = _skid_contacts()
-    for fx, fy, fz in contacts:
-        cx, cy, cz = fy, -fz, -fx                                # FRD → glTF (우현 x, 위 y, 후방 z)
-        # 바닥(접촉점 높이 3 mm 안의 정점)이 접촉점 앞뒤를 덮는다 — 정점은 판의 모서리에만 있으므로 구간으로 본다
-        sole = [p[2] for p in pts if abs(p[0] - cx) < 0.02 and abs(p[2] - cz) < 0.10 and abs(p[1] - cy) < 0.003]
-        assert sole, "접촉점 %s 아래에 스키드 바닥이 없다" % ((fx, fy, fz),)
-        assert min(sole) < cz < max(sole)
-    assert min(p[1] for p in pts) >= min(-fz for _, _, fz in contacts) - 0.003   # 접촉점보다 낮은 데가 없다
-    assert {"Skid_Tube", "Skid_Shoe"} <= g.materials_of("Landing_Skids")
+    for tag in SKID_NODES:
+        assert g.parent_of(tag) == "Fuselage", tag
+    assert g.parent_of("Skid_Mounts") == "Fuselage"
+    pts = [p for tag in SKID_NODES for p in _world_points(g, tag)]
+    for doc in _shahed_docs():
+        contacts = doc["ground"]["skid"]["contacts"]
+        for fx, fy, fz in contacts:
+            cx, cy, cz = fy, -fz, -fx                            # FRD → glTF (우현 x, 위 y, 후방 z)
+            # 바닥(접촉점 높이 3 mm 안의 정점)이 접촉점 앞뒤를 덮는다 — 정점은 판의 모서리에만 있으므로 구간으로 본다
+            sole = [p[2] for p in pts if abs(p[0] - cx) < 0.02 and abs(p[2] - cz) < 0.10 and abs(p[1] - cy) < 0.003]
+            assert sole, "%s: 접촉점 %s 아래에 스키드 바닥이 없다" % (doc["id"], (fx, fy, fz))
+            assert min(sole) < cz < max(sole)
+        assert min(p[1] for p in pts) >= min(-fz for _, _, fz in contacts) - 0.003   # 접촉점보다 낮은 데가 없다
+    for tag in SKID_NODES:
+        assert {"Skid_Tube", "Skid_Shoe"} <= g.materials_of(tag)
+
+
+@pytest.mark.parametrize("name", ["shahed136.glb", "shahed136_eoir.glb"])
+def test_skids_stow_inside_the_airframe_envelope_and_under_the_wing(name):
+    """접힌 스키드(선언한 회전을 힌지 둘레에 실제로 적용)는 기체 외형의 가장 낮은 곳(핀 끝·동체 바닥)보다 내려가지
+    않고, 날개 아랫면보다 올라가지도 않는다 — 관 속에 들어가는 것은 스키드 없는 외형이 기준이다."""
+    g = load(name)
+    stow = _stow(g)
+    assert set(stow) == set(SKID_NODES)
+    folded = {tag: _world_points(g, tag, stow[tag]) for tag in SKID_NODES}
+    airframe = [n for n in _mesh_nodes(g) if n not in (*SKID_NODES, "Skid_Mounts", "Propeller")]
+    lowest = min(p[1] for n in airframe for p in _world_points(g, n))
+    wing_bottom = min(p[1] for p in _world_points(g, "Wing"))
+    for tag, pts in folded.items():
+        assert min(p[1] for p in pts) >= lowest - 0.005, tag
+        assert max(p[1] for p in pts) < wing_bottom, tag
+        # 좌우가 거울이다 — 우현 노드는 +x 쪽에 남는다
+        side = 1.0 if tag == "Skid_R" else -1.0
+        assert all(side * p[0] > 0 for p in pts), tag
+
+
+def _launcher_constants():
+    src = open(os.path.join(WORLD, "core", "launcher.ts"), encoding="utf-8").read()
+    body = src[src.index("export const LAUNCHER_GEOMETRY"):src.index("} as const;", src.index("LAUNCHER_GEOMETRY"))]
+    geo = {k: float(v) for k, v in re.findall(r"\b(\w+): (-?\d+(?:\.\d+)?),", body)}
+    aft = float(re.search(r"const VEHICLE_AFT_EXTENT = (\d+(?:\.\d+)?);", src).group(1))
+    return geo, aft
+
+
+def _liner_half_height():
+    """관 라이너(`Box_Tubes`) 바닥이 관축 아래 몇 m인가 — 발사관 GLB에서 잰다(크래들 로컬 × 루트 스케일)."""
+    lg = Glb(LAUNCHER_GLB)
+    mins = [lg.json["accessors"][p["attributes"]["POSITION"]]["min"][1]
+            for p in lg.json["meshes"][lg.nodes[lg.index["Box_Tubes"]]["mesh"]]["primitives"]]
+    scale = lg.nodes[lg.index["LAUNCHER_Root"]]["scale"][1]
+    return -min(mins) * scale
+
+
+@pytest.mark.parametrize("name", ["shahed136.glb", "shahed136_eoir.glb"])
+def test_stowed_vehicle_fits_the_canister_at_the_example_launches(name):
+    """예제 문서의 레일(고각·원점 높이)에서 관 속 기체가 라이너 바닥 위에 있다 — 스키드는 접힌 자세로.
+
+    가상환경은 기체 꼬리가 관 안에 남게 관축 위의 기준점을 레일 원점과 **수평만** 맞춘다(core/launcher.ts). 그래서 고각
+    θ에서 CG는 관축보다 (피벗 높이 + d·sinθ − 원점 높이)·cosθ 아래에 있다(d = 피벗→기준점, 15°에서 0.41 m). 펼친
+    스키드(CG 아래 0.55)는 바닥을 뚫었다(v2.01 리뷰) — 그래서 관 안·비행 중에는 접는다.
+
+    프로펠러는 뺀다: 도는 원반(반경 0.45)이 바닥보다 7 cm 낮게 지나는 것은 스키드 이전부터다 — 관 벽 속이라 안 보이고
+    포구 아랫입술을 0.6 s의 발사 중 2 cm 스친다."""
+    g = load(name)
+    stow = _stow(g)
+    geo, aft = _launcher_constants()
+    s = geo["rootScale"]
+    pivot_h = (geo["turntableY"] + geo["cradleY"]) * s
+    d = aft - geo["tubeAftZ"] * s
+    liner = _liner_half_height()
+    pts = [p for n in _mesh_nodes(g) if n != "Propeller" for p in _world_points(g, n, stow.get(n))]
+    lowest = -min(p[1] for p in pts)                              # CG 아래 깊이(동체축) [m]
+    for doc in _shahed_docs():
+        rail = doc["ground"]["rail"]
+        th = rail["elev_angle"]
+        below_axis = (pivot_h + d * math.sin(th) - rail["origin_height"]) * math.cos(th)
+        room = liner - below_axis
+        assert lowest <= room - 0.01, "%s: CG 아래 %.3f m까지 내려가는데 라이너 바닥은 %.3f m" % (doc["id"], lowest, room)

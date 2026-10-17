@@ -35,6 +35,7 @@ import {
   LAUNCHER_DOOR_NOTE, PRELUDE_S, advancePrelude, doorOpenFraction, launcherCaptionNotes, launcherPose, startsInCanister,
 } from "../core/launcher.ts";
 import { propellerRate, surfaceDisplayNotes, surfacePose } from "../core/surfaces.ts";
+import { STOW_NOTE, stowFraction } from "../core/stow.ts";
 import { WAVE_NOTES } from "../core/waves.ts";
 import type { Replay } from "../core/types.ts";
 import {
@@ -45,7 +46,7 @@ import { SceneHost, createSceneHost, type Marker, type ViewStyle } from "./Scene
 import { buildCoastField } from "../core/coastfield.ts";
 import { buildTerrain } from "./terrain.ts";
 import {
-  LAUNCHER_NODES, applyLauncherDoors, applySurfaces, hideVehicle, loadModel,
+  LAUNCHER_NODES, applyLauncherDoors, applyStow, applySurfaces, hasStow, hideVehicle, loadModel,
   setVehiclePose, showLauncher, spinPropeller, vehicleDriveNodes, type LoadedModel,
 } from "./models.ts";
 import { SCHEMATIC_NOTE, schematicCaption, vehicleSchematic } from "../lib/vehicleschematic.ts";
@@ -188,6 +189,10 @@ export class SceneController {
   private doorsOn = false;
   /** 발사 전주 시각 [s, 0…PRELUDE_S] — 처음부터 재생할 때 시뮬 시각 0에 머물며 문을 연다. PRELUDE_S면 끝났다. */
   private preT = PRELUDE_S;
+  /** 관에서 발사하는 결과인가 — 그러면 착륙 스키드를 관 안·비행 중 접고 접지 전에 편다(core/stow.ts). */
+  private stowAtStart = false;
+  /** 첫 접지 시각 [s] — 결과 `meta.phases.touchdown_t`. 없으면 null(내내 접힘). */
+  private touchdownT: number | null = null;
 
   // ---- 게임 모드 상태 — 정본은 컨트롤러다(시점·재생과 같은 사유).
   private arcade: ArcadeState | null = null;
@@ -558,6 +563,9 @@ export class SceneController {
       this.doorsOn = false;
     }
     this.preT = this.doorsOn ? 0 : PRELUDE_S;
+    // 스키드 — 발사관 모델과 무관하게 정한다(발사관 GLB가 없어도 기체는 관에서 나온다)
+    this.stowAtStart = lp != null && startsInCanister(body.signals.on_rail?.[0]);
+    this.touchdownT = num(body.meta?.phases?.touchdown_t);
     this.dist = Math.max(sceneExtent(body.signals) * 0.25, 200);
     this.resultNotes = notes;
     this.emitNotes();
@@ -579,6 +587,7 @@ export class SceneController {
       if (this.vehicleKind === "schematic") return [...head, SCHEMATIC_NOTE];
       // 타면 문장은 이 모델이 가진 노드만 — 단발 러더·프로펠러 없는 기체에 쌍 러더·프로펠러 규약을 말하지 않는다
       const out = [...head, ...surfaceDisplayNotes(new Set(this.vehicle.nodes.keys()))];
+      if (hasStow(this.vehicle)) out.push(STOW_NOTE);
       if (this.vehicle.missing.length > 0) {
         out.push(`모델에서 못 찾은 노드: ${this.vehicle.missing.join(", ")} — 그 부분은 움직이지 않습니다.`);
       }
@@ -1000,6 +1009,7 @@ export class SceneController {
     const axes = q ? bodyAxesNed(q) : null;
     if (this.vehicle) {
       if (axes) setVehiclePose(this.vehicle, a.pos, axes, MODEL_SCALE);
+      applyStow(this.vehicle, 0); // 게임은 늘 펼친다 — 아케이드는 관에서 나오지도, 접지 시각을 알지도 않는다
       // 프로펠러 — 스로틀 축(−1‥1)을 0‥1로 옮겨 돌린다. 표시 값이다.
       const thr = 0.5 + 0.5 * this.gameInput.throttle;
       spinPropeller(this.vehicle, propellerRate(thr, thr), dtWall);
@@ -1062,6 +1072,8 @@ export class SceneController {
     // 시각을 모르는 표본이면 마지막 값을 쓴다 — 0으로 되돌리면 바다가 튄다.
     const t = body.t[i];
     if (typeof t === "number" && Number.isFinite(t)) this.lastSeaTime = t;
+    // 착륙 스키드 — 마지막 성한 시뮬 시각으로 접고 편다(그리기 전에)
+    if (this.vehicle) applyStow(this.vehicle, stowFraction(this.lastSeaTime, this.stowAtStart, this.touchdownT));
     this.host.render(cam, this.lastSeaTime);
     this.emitReadout(i, groundElev);
     this.emitStats(performance.now());

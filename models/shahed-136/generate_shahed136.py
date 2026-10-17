@@ -13,6 +13,7 @@
 
 import bpy
 import bmesh
+import json
 import math
 import os
 import sys
@@ -752,36 +753,48 @@ for sx, tag in ((1.0, "R"), (-1.0, "L")):
 for ob in [*elevons.values(), *rudders.values()]:
     shade_smooth(ob)
 
-# ---------------------------------------------------------------- 착륙 스키드 (분리 오브젝트, 고정)
-# 회수 착륙용 헬기식 스키드 두 줄 — 바닥 양쪽. 바닥은 예제 기체 문서의 시뮬 접촉점(engine/claw/profile/examples/
-# delta_demo.json `ground.skid.contacts` = FRD (±0.6, ±0.6, 0.55), CG 기준)에 앉는다 — 모델 원점이 CG이므로 블렌더로
-# x ±0.6 · y ±0.6 · z −0.55. 화면의 스키드 바닥이 그 자리여야 착지·활주에서 기체가 뜨거나 묻히지 않는다(테스트가
-# 문서에서 읽어 대조한다). 가로 관은 접촉점 자리(y ±0.6)에서 스키드에 내려앉고, 동체 바닥에는 안장 받침 + 띠로 물린다.
-# 동체 바닥 높이는 형상에서 잰다(광선) — 동체 단면이 y마다 달라 앞·뒤 관의 높이가 다르다.
+# ---------------------------------------------------------------- 착륙 스키드 (접는 두 다리 + 고정 힌지 받침)
+# 회수 착륙용 스키드 두 줄 — 바닥 양쪽. **쉬는 자세(GLB 노드 자세)는 펼침**이고, 마모판 밑면이 예제 기체 문서의 시뮬
+# 접촉점(engine/claw/profile/examples/*.json `ground.skid.contacts` = FRD (±0.6, ±0.6, 0.55), CG 기준)에 앉는다 — 모델
+# 원점이 CG이므로 블렌더로 x ±0.6 · y ±0.6 · z −0.55. 화면의 스키드 바닥이 그 자리여야 착지·활주에서 기체가 뜨거나
+# 묻히지 않는다(테스트가 문서에서 읽어 대조한다).
+#
+# 펼친 스키드는 캐니스터에 안 들어간다 — 가상환경은 꼬리가 관 안에 남게 기체를 관축 위 기준점과 수평만 맞춰, 15° 발사에서
+# CG가 관축보다 0.41 m 아래이고 라이너 바닥까지 0.38 m뿐이다(v2.01 리뷰). 그래서 한쪽씩 동체 바닥의 앞뒤 축(힌지) 둘레로
+# 바깥·위로 접어 날개 밑에 눕힌다. 접힌 자세는 루트 extras `claw_stow`(노드 → 쉬는 자세에 더할 three Euler XYZ)로
+# 선언하고, 가상환경이 관 안·비행 중엔 접고 접지 전에 편다. 힌지 받침(Skid_Mounts)은 동체 바닥에 붙은 고정 부품이다.
 MAT_SKID = make_mat("Skid_Tube", (0.200, 0.208, 0.214), rough=0.48, coat=0.06)     # 도장한 강관
 MAT_SHOE = make_mat("Skid_Shoe", (0.330, 0.330, 0.335), rough=0.55, metal=1.0)     # 닳는 강판(바닥 마모판)
 SKID_X, SKID_Y, SKID_Z = 0.60, (-0.60, 0.60), -0.55     # 접촉점 [블렌더] — 바닥 = 마모판 밑면
-SKID_R, CROSS_R, SHOE_T = 0.016, 0.014, 0.008
+SKID_R, LEG_R, SHOE_T = 0.016, 0.014, 0.008
 SKID_ZC = SKID_Z + SHOE_T + SKID_R                      # 스키드 관 중심 높이 — 마모판 위에 얹힌다
-SADDLE_X = 0.13                                         # 안장 받침 자리(동체 반폭 0.28 안쪽)
+HINGE_X = 0.17                                          # 힌지축 |x| — 동체 바닥(반폭 0.28) 안쪽
+KNUCKLE_R, KNUCKLE_L = 0.018, 0.044                     # 다리 쪽 힌지 마디
+STOW_EXTRA = math.radians(4.0)                          # 접으면 다리가 수평보다 이만큼 위 — 바닥에서 최대한 올린다
 
 
-def bezier(p0, p1, p2, p3, n):
-    return [tuple(((1 - t) ** 3) * a + 3 * ((1 - t) ** 2) * t * b + 3 * (1 - t) * t * t * c + t ** 3 * d
-                  for a, b, c, d in zip(p0, p1, p2, p3)) for t in (k / n for k in range(n + 1))]
+def set_pivot(ob, p):
+    """메시를 옮겨 오브젝트 원점을 p(월드)에 둔다 — 회전축(힌지)이 원점이어야 노드 회전이 힌지 둘레다."""
+    from mathutils import Matrix
+    ob.data.transform(Matrix.Translation(-Vector(p)))
+    ob.location = p
 
 
 def skids_build():
     belly = kit.Surface(fuselage.data)
-    bm = bmesh.new()
-    SKID, SHOE, FAST, DARK = range(4)
-    for sx in (1.0, -1.0):
-        x = sx * SKID_X
+    belly_z = {(sx, yc): belly.hit((sx * HINGE_X, yc, -0.6), (0, 0, 1))[0].z for sx in (1.0, -1.0) for yc in SKID_Y}
+    hinge_z = min(belly_z.values()) - 0.045             # 힌지축 높이 — 앞뒤 공통(곧은 축), 낮은 쪽 바닥에서 4.5 cm 아래
+    mounts = bmesh.new()
+    legs, stow = {}, {}
+    for sx, tag in ((1.0, "R"), (-1.0, "L")):
+        bm = bmesh.new()
+        SKID, SHOE, FAST, DARK = range(4)
+        x, xh = sx * SKID_X, sx * HINGE_X
         # 스키드 관 — 뒤는 곧게 끊고 마개, 앞은 위로 휜다(풀·턱에 걸리지 않게)
         path = [(x, -0.70, SKID_ZC), (x, 0.0, SKID_ZC), (x, 0.66, SKID_ZC)]
-        path += [(x, 0.66 + 0.10 * math.sin(math.radians(a)), SKID_ZC + 0.10 * (1 - math.cos(math.radians(a))))
+        path += [(x, 0.66 + 0.08 * math.sin(math.radians(a)), SKID_ZC + 0.08 * (1 - math.cos(math.radians(a))))
                  for a in range(10, 71, 10)]
-        path.append((x, path[-1][1] + 0.025 * math.cos(math.radians(70)), path[-1][2] + 0.025 * math.sin(math.radians(70))))
+        path.append((x, path[-1][1] + 0.02 * math.cos(math.radians(70)), path[-1][2] + 0.02 * math.sin(math.radians(70))))
         kit.paint(kit.tube(bm, path, SKID_R, n=12), SKID, smooth=True)
         kit.paint(kit.lathe(bm, (x, -0.70, SKID_ZC), (0, -1, 0), [(0.0, SKID_R * 0.92), (0.006, SKID_R * 0.92),
                                                                    (0.010, SKID_R * 0.55)], n=12), DARK, smooth=True)
@@ -789,37 +802,49 @@ def skids_build():
             # 마모판 — 접촉점 밑. 밑면이 곧 접지면이다
             kit.paint(kit.rounded_box(bm, (x - 0.012, yc - 0.075, SKID_Z), (x + 0.012, yc + 0.075, SKID_ZC - 0.6 * SKID_R),
                                       0.003), SHOE)
-            # 가로 관이 내려앉는 소켓(칼라)
+            # 다리가 꽂히는 칼라
             kit.paint(kit.lathe(bm, (x, yc - 0.035, SKID_ZC), (0, 1, 0),
                                 [(0.0, SKID_R + 0.0035), (0.07, SKID_R + 0.0035)], n=12), FAST, smooth=True)
-    for yc in SKID_Y:
-        # 가로 관 — 동체 바로 밑을 곧게 지나 바깥에서 아래로 휘어 스키드 소켓에 꽂힌다
-        z_mid = belly.hit((0.0, yc, -0.6), (0, 0, 1))[0].z - 0.004 - CROSS_R
-        right = bezier((SADDLE_X + 0.03, yc, z_mid), (SADDLE_X + 0.30, yc, z_mid),
-                       (SKID_X, yc, SKID_ZC + 0.19), (SKID_X, yc, SKID_ZC), 14)
-        left = [(-px, py, pz) for px, py, pz in right]
-        kit.paint(kit.tube(bm, list(reversed(left)) + right, CROSS_R, n=12), SKID, smooth=True)
-        for sx in (1.0, -1.0):
-            xs = sx * SADDLE_X
-            top = belly.hit((xs, yc, -0.6), (0, 0, 1))[0].z + 0.003     # 동체에 3 mm 묻는다(뜬 틈이 안 보이게)
-            kit.paint(kit.rounded_box(bm, (xs - 0.028, yc - 0.024, z_mid), (xs + 0.028, yc + 0.024, top), 0.005), DARK)
-            kit.paint(kit.lathe(bm, (xs - 0.018, yc, z_mid), (1, 0, 0),
-                                [(0.0, CROSS_R + 0.003), (0.036, CROSS_R + 0.003)], n=12), FAST, smooth=True)
-            for dy in (-0.017, 0.017):                  # 받침 고정 볼트 — 앞뒤 면
-                kit.paint(kit.lathe(bm, (xs, yc + math.copysign(0.024, dy), z_mid + 0.022),
-                                    (0, math.copysign(1, dy), 0), [(-0.001, 0.0045), (0.003, 0.0045), (0.004, 0.0035)],
-                                    n=6), FAST)
-    ob = finish_bm("Landing_Skids", bm, [MAT_SKID, MAT_SHOE, MAT_FAST, MAT_DARK], col_model)
-    shade_smooth(ob)
-    return ob
+            # 다리 — 힌지 마디에서 칼라 위까지 곧은 관(판스프링형), 칼라 쪽 끝을 살짝 세운다
+            top = Vector((xh + sx * 0.012, yc, hinge_z - 0.006))
+            foot = Vector((x, yc, SKID_ZC + SKID_R + 0.002))
+            knee = foot + Vector((-sx * 0.035, 0.0, 0.05))
+            kit.paint(kit.tube(bm, [top, top + (knee - top) * 0.5, knee, foot], LEG_R, n=12), SKID, smooth=True)
+            # 힌지 마디(다리 쪽) — 축을 따라
+            kit.paint(kit.lathe(bm, (xh, yc - KNUCKLE_L / 2, hinge_z), (0, 1, 0),
+                                [(0.0, KNUCKLE_R), (KNUCKLE_L, KNUCKLE_R)], n=12), FAST, smooth=True)
+            # 힌지 받침(동체 쪽, 고정) — 마디 양옆 판 + 바닥 판 + 핀
+            under = belly_z[(sx, yc)] + 0.003                  # 동체에 3 mm 묻는다(뜬 틈이 안 보이게)
+            for dy in (-1.0, 1.0):
+                y0 = yc + dy * (KNUCKLE_L / 2 + 0.002)
+                y1 = y0 + dy * 0.008
+                kit.paint(kit.rounded_box(mounts, (xh - 0.022, min(y0, y1), hinge_z - 0.022),
+                                          (xh + 0.022, max(y0, y1), under), 0.003), 0)
+            kit.paint(kit.rounded_box(mounts, (xh - 0.030, yc - 0.045, under - 0.012), (xh + 0.030, yc + 0.045, under),
+                                      0.004), 0)
+            kit.paint(kit.lathe(mounts, (xh, yc - KNUCKLE_L / 2 - 0.013, hinge_z), (0, 1, 0),
+                                [(0.0, 0.007), (KNUCKLE_L + 0.026, 0.007)], n=8), 1, smooth=True)
+        ob = finish_bm("Skid_" + tag, bm, [MAT_SKID, MAT_SHOE, MAT_FAST, MAT_DARK], col_model)
+        set_pivot(ob, (xh, 0.0, hinge_z))
+        shade_smooth(ob)
+        legs["Skid_" + tag] = ob
+        # 접힘 — 힌지→스키드 관 중심이 수평보다 STOW_EXTRA 위로. 블렌더 +Y축(앞뒤) 회전은 glTF에서 −Z축 회전이라
+        # three `rotation.z`의 부호가 뒤집힌다: 우현(+x) 다리는 +, 좌현은 −가 바깥·위로 접는다
+        drop = math.atan2(hinge_z - SKID_ZC, SKID_X - HINGE_X)
+        stow[ob.name] = [0.0, 0.0, sx * (drop + STOW_EXTRA)]
+    mount = finish_bm("Skid_Mounts", mounts, [MAT_DARK, MAT_FAST], col_model)
+    shade_smooth(mount)
+    return legs, mount, stow
 
 
-skids = skids_build()
+skid_legs, skid_mounts, SKID_STOW = skids_build()
 
 # ---------------------------------------------------------------- 루트 엠프티 + 계층
 root = bpy.data.objects.new("SHAHED136_Root", None)
 root.empty_display_type = 'PLAIN_AXES'
 root.empty_display_size = 0.6
+# 접는 노드 선언 — glTF extras로 실려 가상환경이 읽는다(web/world/src/core/stow.ts). 접힌 자세 = 쉬는 자세 + 이 회전
+root["claw_stow"] = json.dumps({k: [round(a, 6) for a in v] for k, v in SKID_STOW.items()})
 col_model.objects.link(root)
 
 bpy.context.view_layer.update()
@@ -834,7 +859,8 @@ parent_to(fuselage, root)
 parent_to(wing, fuselage)
 parent_to(prop, fuselage)
 parent_to(engine, fuselage)
-parent_to(skids, fuselage)
+for ob in [*skid_legs.values(), skid_mounts]:
+    parent_to(ob, fuselage)
 for ob in elevons.values():
     parent_to(ob, wing)
 for tag in ("L", "R"):
@@ -1034,7 +1060,7 @@ def export_threejs_glb(path):
 
     common = dict(filepath=path, export_format='GLB', use_selection=True,
                   export_animations=True, export_frame_range=True,
-                  export_apply=False, export_yup=True)
+                  export_apply=False, export_yup=True, export_extras=True)   # extras: 루트의 claw_stow
     try:                                        # 씬 전체를 단일 클립으로 (three.js에 이상적)
         bpy.ops.export_scene.gltf(export_animation_mode='SCENE',
                                   export_anim_scene_split_object=False, **common)

@@ -190,3 +190,23 @@ describe("SceneController 배선 — 발사관 문과 발사 전주", () => {
     assert.match(src, /if \(this\.doorsOn\) notes\.push\(LAUNCHER_DOOR_NOTE\);/);
   });
 });
+
+describe("SceneController 배선 — 착륙 스키드 접기", () => {
+  it("결과를 읽을 때 관에서 발사하는가·접지 시각을 정한다", () => {
+    assert.match(src, /this\.stowAtStart = lp != null && startsInCanister\(body\.signals\.on_rail\?\.\[0\]\);/);
+    assert.match(src, /this\.touchdownT = num\(body\.meta\?\.phases\?\.touchdown_t\);/);
+  });
+
+  it("재생은 시뮬 시각으로 접고 펴고(그리기 전에), 게임은 늘 편다", () => {
+    const draw = fn("draw");
+    assert.match(draw, /applyStow\(this\.vehicle, stowFraction\(this\.lastSeaTime, this\.stowAtStart, this\.touchdownT\)\)/);
+    // 시각을 읽어 둔 **뒤**, 그리기 **전**이다 — 앞이면 한 프레임 늦은 시각으로 접는다
+    const at = (s: string) => draw.indexOf(s);
+    assert.ok(at("this.lastSeaTime = t") < at("applyStow(") && at("applyStow(") < at("this.host.render("));
+    assert.match(fn("drawGame"), /applyStow\(this\.vehicle, 0\)/);
+  });
+
+  it("접는 모델이면 캡션이 표시용임을 밝힌다", () => {
+    assert.match(fn("vehicleNotes"), /if \(hasStow\(this\.vehicle\)\) out\.push\(STOW_NOTE\);/);
+  });
+});
