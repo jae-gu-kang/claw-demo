@@ -195,18 +195,20 @@ describe("SceneController 배선 — 착륙 스키드 접기", () => {
   it("결과를 읽을 때 관에서 발사하는가·접지 시각을 정한다", () => {
     assert.match(src, /this\.stowAtStart = lp != null && startsInCanister\(body\.signals\.on_rail\?\.\[0\]\);/);
     assert.match(src, /this\.touchdownT = num\(body\.meta\?\.phases\?\.touchdown_t\);/);
+    // 레일 이탈 전엔 펴지 않는다 — 발사 직후 추락처럼 접지가 이르면 관 안에서 펴졌다(v2.02 리뷰)
+    assert.match(src, /this\.railExitT = railExitTime\(body\.meta\?\.phases\?\.launch_exit_t, body\.t, body\.signals\.on_rail\);/);
   });
 
   it("재생은 시뮬 시각으로 접고 펴고(그리기 전에), 게임은 늘 편다", () => {
     const draw = fn("draw");
-    assert.match(draw, /applyStow\(this\.vehicle, stowFraction\(this\.lastSeaTime, this\.stowAtStart, this\.touchdownT\)\)/);
+    assert.match(draw, /applyStow\(this\.vehicle, stowFraction\(this\.lastSeaTime, this\.stowAtStart, this\.touchdownT, this\.railExitT\)\)/);
     // 시각을 읽어 둔 **뒤**, 그리기 **전**이다 — 앞이면 한 프레임 늦은 시각으로 접는다
     const at = (s: string) => draw.indexOf(s);
     assert.ok(at("this.lastSeaTime = t") < at("applyStow(") && at("applyStow(") < at("this.host.render("));
     assert.match(fn("drawGame"), /applyStow\(this\.vehicle, 0\)/);
   });
 
-  it("접는 모델이면 캡션이 표시용임을 밝힌다", () => {
-    assert.match(fn("vehicleNotes"), /if \(hasStow\(this\.vehicle\)\) out\.push\(STOW_NOTE\);/);
+  it("실제로 접고 펴는 결과에서만 캡션이 표시용임을 밝힌다 — 관 밖 출발·게임은 늘 펼침이라 없는 동작을 설명하지 않는다", () => {
+    assert.match(fn("vehicleNotes"), /if \(hasStow\(this\.vehicle\) && this\.stowAtStart && !this\.gameOn\) out\.push\(STOW_NOTE\);/);
   });
 });

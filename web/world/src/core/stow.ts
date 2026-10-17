@@ -42,15 +42,34 @@ export function parseStow(declared: unknown): StowEntry[] {
  * - 관에서 발사하지 않는 결과(`startsInCanister` 거짓) — 늘 펼침. 접을 까닭이 없다.
  * - 관에서 발사하고 접지가 없으면 — 내내 접힘.
  * - 아니면 접지 `SKID_DEPLOY_LEAD_S` 전부터 `SKID_DEPLOY_S` 동안 매끄럽게(smoothstep) 편다. 활주·정지 중엔 펼침.
+ *   **단 레일을 떠나기 전엔 펴지 않는다**(`railExitT`) — `touchdown_t`는 첫 지면 접촉이라 발사 직후 추락도 포함하고,
+ *   그 20 s 전이 시각 0보다 앞서면 관 안(문 열리는 전주·레일 주행)에서 펴져 바닥을 뚫는다(v2.02 리뷰). 이탈 시각을
+ *   모르면 0으로 본다 — 그런 옛 결과는 접지 시각도 없어 위의 「내내 접힘」에 걸린다.
  * - 시각이 성하지 않으면 접힘 — 펼침을 지어내지 않는다. */
-export function stowFraction(t: number, startsInCanister: boolean, touchdownT: number | null): number {
+export function stowFraction(
+  t: number, startsInCanister: boolean, touchdownT: number | null, railExitT: number | null,
+): number {
   if (!startsInCanister) return 0;
   if (touchdownT == null || !Number.isFinite(touchdownT) || !Number.isFinite(t)) return 1;
-  const u = Math.min(Math.max((t - (touchdownT - SKID_DEPLOY_LEAD_S)) / SKID_DEPLOY_S, 0), 1);
+  const exit = railExitT != null && Number.isFinite(railExitT) ? railExitT : 0;
+  const start = Math.max(touchdownT - SKID_DEPLOY_LEAD_S, exit);
+  const u = Math.min(Math.max((t - start) / SKID_DEPLOY_S, 0), 1);
   return 1 - u * u * (3 - 2 * u);
+}
+
+/** 레일 이탈 시각 [s] — 결과 `meta.phases.launch_exit_t`가 먼저, 없으면 `on_rail`이 처음 **거짓**인 표본의 시각(결측은
+ *  이탈이 아니다). 둘 다 없으면 null. */
+export function railExitTime(
+  phasesExit: number | null | undefined, t: readonly number[], onRail: readonly (boolean | null)[] | undefined,
+): number | null {
+  if (typeof phasesExit === "number" && Number.isFinite(phasesExit)) return phasesExit;
+  if (!onRail) return null;
+  const i = onRail.findIndex((v) => v === false);
+  const ti = i >= 0 ? t[i] : undefined;
+  return typeof ti === "number" && Number.isFinite(ti) ? ti : null;
 }
 
 /** 접는 노드가 있는 모델이면 캡션이 붙이는 줄. */
 export const STOW_NOTE =
-  `착륙 스키드는 표시용으로 접고 폅니다 — 관에서 발사하는 결과면 관 안·비행 중엔 접어 두었다가 접지 ${SKID_DEPLOY_LEAD_S}초 전에 `
+  `착륙 스키드는 표시용으로 접고 폅니다 — 관 안·비행 중엔 접어 두었다가 접지 ${SKID_DEPLOY_LEAD_S}초 전(레일을 떠난 뒤)에 `
   + "폅니다(시뮬의 스키드 접촉점은 처음부터 있습니다).";

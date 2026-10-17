@@ -35,7 +35,7 @@ import {
   LAUNCHER_DOOR_NOTE, PRELUDE_S, advancePrelude, doorOpenFraction, launcherCaptionNotes, launcherPose, startsInCanister,
 } from "../core/launcher.ts";
 import { propellerRate, surfaceDisplayNotes, surfacePose } from "../core/surfaces.ts";
-import { STOW_NOTE, stowFraction } from "../core/stow.ts";
+import { STOW_NOTE, railExitTime, stowFraction } from "../core/stow.ts";
 import { WAVE_NOTES } from "../core/waves.ts";
 import type { Replay } from "../core/types.ts";
 import {
@@ -193,6 +193,8 @@ export class SceneController {
   private stowAtStart = false;
   /** 첫 접지 시각 [s] — 결과 `meta.phases.touchdown_t`. 없으면 null(내내 접힘). */
   private touchdownT: number | null = null;
+  /** 레일 이탈 시각 [s] — 그 전엔 스키드를 펴지 않는다(관 안). */
+  private railExitT: number | null = null;
 
   // ---- 게임 모드 상태 — 정본은 컨트롤러다(시점·재생과 같은 사유).
   private arcade: ArcadeState | null = null;
@@ -566,6 +568,7 @@ export class SceneController {
     // 스키드 — 발사관 모델과 무관하게 정한다(발사관 GLB가 없어도 기체는 관에서 나온다)
     this.stowAtStart = lp != null && startsInCanister(body.signals.on_rail?.[0]);
     this.touchdownT = num(body.meta?.phases?.touchdown_t);
+    this.railExitT = railExitTime(body.meta?.phases?.launch_exit_t, body.t, body.signals.on_rail);
     this.dist = Math.max(sceneExtent(body.signals) * 0.25, 200);
     this.resultNotes = notes;
     this.emitNotes();
@@ -587,7 +590,8 @@ export class SceneController {
       if (this.vehicleKind === "schematic") return [...head, SCHEMATIC_NOTE];
       // 타면 문장은 이 모델이 가진 노드만 — 단발 러더·프로펠러 없는 기체에 쌍 러더·프로펠러 규약을 말하지 않는다
       const out = [...head, ...surfaceDisplayNotes(new Set(this.vehicle.nodes.keys()))];
-      if (hasStow(this.vehicle)) out.push(STOW_NOTE);
+      // 실제로 접고 펴는 결과에서만 — 관 밖 출발·게임은 늘 펼침이라 없는 동작을 설명하지 않는다
+      if (hasStow(this.vehicle) && this.stowAtStart && !this.gameOn) out.push(STOW_NOTE);
       if (this.vehicle.missing.length > 0) {
         out.push(`모델에서 못 찾은 노드: ${this.vehicle.missing.join(", ")} — 그 부분은 움직이지 않습니다.`);
       }
@@ -1073,7 +1077,7 @@ export class SceneController {
     const t = body.t[i];
     if (typeof t === "number" && Number.isFinite(t)) this.lastSeaTime = t;
     // 착륙 스키드 — 마지막 성한 시뮬 시각으로 접고 편다(그리기 전에)
-    if (this.vehicle) applyStow(this.vehicle, stowFraction(this.lastSeaTime, this.stowAtStart, this.touchdownT));
+    if (this.vehicle) applyStow(this.vehicle, stowFraction(this.lastSeaTime, this.stowAtStart, this.touchdownT, this.railExitT));
     this.host.render(cam, this.lastSeaTime);
     this.emitReadout(i, groundElev);
     this.emitStats(performance.now());

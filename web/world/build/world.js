@@ -39870,13 +39870,22 @@ function parseStow(declared) {
   }
   return out;
 }
-function stowFraction(t2, startsInCanister2, touchdownT) {
+function stowFraction(t2, startsInCanister2, touchdownT, railExitT) {
   if (!startsInCanister2) return 0;
   if (touchdownT == null || !Number.isFinite(touchdownT) || !Number.isFinite(t2)) return 1;
-  const u2 = Math.min(Math.max((t2 - (touchdownT - SKID_DEPLOY_LEAD_S)) / SKID_DEPLOY_S, 0), 1);
+  const exit = railExitT != null && Number.isFinite(railExitT) ? railExitT : 0;
+  const start = Math.max(touchdownT - SKID_DEPLOY_LEAD_S, exit);
+  const u2 = Math.min(Math.max((t2 - start) / SKID_DEPLOY_S, 0), 1);
   return 1 - u2 * u2 * (3 - 2 * u2);
 }
-const STOW_NOTE = `착륙 스키드는 표시용으로 접고 폅니다 — 관에서 발사하는 결과면 관 안·비행 중엔 접어 두었다가 접지 ${SKID_DEPLOY_LEAD_S}초 전에 폅니다(시뮬의 스키드 접촉점은 처음부터 있습니다).`;
+function railExitTime(phasesExit, t2, onRail) {
+  if (typeof phasesExit === "number" && Number.isFinite(phasesExit)) return phasesExit;
+  if (!onRail) return null;
+  const i = onRail.findIndex((v2) => v2 === false);
+  const ti2 = i >= 0 ? t2[i] : void 0;
+  return typeof ti2 === "number" && Number.isFinite(ti2) ? ti2 : null;
+}
+const STOW_NOTE = `착륙 스키드는 표시용으로 접고 폅니다 — 관 안·비행 중엔 접어 두었다가 접지 ${SKID_DEPLOY_LEAD_S}초 전(레일을 떠난 뒤)에 폅니다(시뮬의 스키드 접촉점은 처음부터 있습니다).`;
 const G = 9.80665;
 function significantWaveHeight(windSpeed) {
   const u2 = Math.max(windSpeed, 0);
@@ -47526,6 +47535,8 @@ class SceneController {
   stowAtStart = false;
   /** 첫 접지 시각 [s] — 결과 `meta.phases.touchdown_t`. 없으면 null(내내 접힘). */
   touchdownT = null;
+  /** 레일 이탈 시각 [s] — 그 전엔 스키드를 펴지 않는다(관 안). */
+  railExitT = null;
   // ---- 게임 모드 상태 — 정본은 컨트롤러다(시점·재생과 같은 사유).
   arcade = null;
   gameInput = { turn: 0, pitch: 0, throttle: 0 };
@@ -47838,6 +47849,7 @@ class SceneController {
     this.preT = this.doorsOn ? 0 : PRELUDE_S;
     this.stowAtStart = lp != null && startsInCanister(body.signals.on_rail?.[0]);
     this.touchdownT = num(body.meta?.phases?.touchdown_t);
+    this.railExitT = railExitTime(body.meta?.phases?.launch_exit_t, body.t, body.signals.on_rail);
     this.dist = Math.max(sceneExtent(body.signals) * 0.25, 200);
     this.resultNotes = notes;
     this.emitNotes();
@@ -47853,7 +47865,7 @@ class SceneController {
       const head = this.vehicleLoading === "doc" ? ["기체 문서를 받는 중… — 지금 보이는 모델은 앞서 얹은 것이고, 문서가 오면 그 문서의 표시 모델로 맞춥니다."] : this.vehicleCaption ? [this.vehicleCaption] : [];
       if (this.vehicleKind === "schematic") return [...head, SCHEMATIC_NOTE];
       const out = [...head, ...surfaceDisplayNotes(new Set(this.vehicle.nodes.keys()))];
-      if (hasStow(this.vehicle)) out.push(STOW_NOTE);
+      if (hasStow(this.vehicle) && this.stowAtStart && !this.gameOn) out.push(STOW_NOTE);
       if (this.vehicle.missing.length > 0) {
         out.push(`모델에서 못 찾은 노드: ${this.vehicle.missing.join(", ")} — 그 부분은 움직이지 않습니다.`);
       }
@@ -48278,7 +48290,7 @@ class SceneController {
     const cam = this.cameraFor(pos, q2, dtWall, groundElev);
     const t2 = body.t[i];
     if (typeof t2 === "number" && Number.isFinite(t2)) this.lastSeaTime = t2;
-    if (this.vehicle) applyStow(this.vehicle, stowFraction(this.lastSeaTime, this.stowAtStart, this.touchdownT));
+    if (this.vehicle) applyStow(this.vehicle, stowFraction(this.lastSeaTime, this.stowAtStart, this.touchdownT, this.railExitT));
     this.host.render(cam, this.lastSeaTime);
     this.emitReadout(i, groundElev);
     this.emitStats(performance.now());

@@ -210,7 +210,7 @@ def test_doors_hang_on_the_cradle_and_close_the_muzzle(glb):
     shut = _door_points(glb, "Door_L", 0.0) + _door_points(glb, "Door_R", 0.0)
     assert max(p[2] for p in shut) <= FACE_CLEAR                       # 포구 면 앞
     # 개구를 **면으로** 덮는다 — 범위만 보면 경첩 마디만으로도 통과한다(v2.01 리뷰). 포구 면과 나란한 문짝 면(앞·뒷면·테)의
-    # 삼각형을 xy로 눕혀, 개구 위 격자점 하나하나가 그 안에 드는지 본다. 가운데 맞닿는 틈(1.2 cm)만 뺀다.
+    # 삼각형을 xy로 눕혀, 개구 위 격자점 하나하나가 그 안에 드는지 본다.
     flat = []
     for name in ("Door_L", "Door_R"):
         t = glb.node(name)["translation"]
@@ -231,8 +231,11 @@ def test_doors_hang_on_the_cradle_and_close_the_muzzle(glb):
             if not ((d1 < -1e-12 or d2 < -1e-12 or d3 < -1e-12) and (d1 > 1e-12 or d2 > 1e-12 or d3 > 1e-12)):
                 return True
         return False
-    holes = [(x / 100, y / 100) for x in range(-130, 131, 5) for y in range(-40, 41, 5)
-             if abs(x) > 1 and not covered(x / 100, y / 100)]
+    # 5 cm 격자 + 개구 가장자리(±1.319·±0.419)와 가운데 맞닿는 자리(맞댐띠가 덮는다) — 격자만이면 가장자리 2 cm·가운데
+    # 10 cm 틈을 놓친다(v2.02 리뷰)
+    xs = sorted({x / 100 for x in range(-130, 131, 5)} | {-1.319, 1.319, -0.008, -0.004, 0.0, 0.004, 0.008})
+    ys = sorted({y / 100 for y in range(-40, 41, 5)} | {-0.419, 0.419})
+    holes = [(x, y) for x in xs for y in ys if not covered(x, y)]
     assert not holes, holes[:5]
 
 
