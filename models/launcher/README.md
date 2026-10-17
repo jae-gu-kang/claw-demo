@@ -14,7 +14,7 @@
 | `launcher.blend` | 산출된 블렌더 파일 (Blender 4.0+) — 드라이버·커스텀 프로퍼티 리그 |
 | `launcher.glb` | **three.js용** glTF — 가동부가 개별 노드로 살아 있고, 데모 동작이 애니메이션 클립으로 구워져 있다 |
 | `preview.png` | 미리보기 렌더 (Cycles) |
-| `test_generate_launcher.py` | GLB의 노드·피벗·개구·포구·레일 끝(가상환경 `LAUNCHER_GEOMETRY`)과 디테일 재질 검사 — `pytest models` (블렌더 불필요) |
+| `test_generate_launcher.py` | GLB의 노드·피벗·개구·포구·레일 끝(가상환경 `LAUNCHER_GEOMETRY`), 포구 문 여닫이·관 통로, 디테일 재질 검사 — `pytest models` (블렌더 불필요) |
 
 ## 디테일 — 실물처럼 읽히게 (2026-10-18)
 
@@ -31,6 +31,24 @@
 `test_generate_launcher.py`가 GLB에서 고정한다. 앞 상판의 공구함·연료통은 캐니스터 쓸림 반경(턴테이블 축에서 약 3.0)
 밖이고, 고각 48°의 뒤끝 여유는 GLB 실측으로 확인했다(크래들 최저 0.887 > 상판 0.84 — 시험은 없다).
 
+## 포구 문 (2026-10-18)
+
+포구에 좌우 두 짝 문을 단다 — 바깥 앞모서리의 **수직 경첩**으로 바깥·앞으로 `DOOR_OPEN`(115°) 연다. 위로 여는 한 짝은
+포구 앞으로 1.2 뻗은 상부 레일에 걸려서 쓰지 않았다. 경첩축은 상자 바깥 모서리 밖·문 두께 가운데라 문이 포구 면 뒤로 돌아
+들어가지 않는다. 문짝 앞면: 둘레 테와 볼트, 가로 보강 둘, 「DANGER」·「KEEP CLEAR OF DOORS」, 경첩 띠와 마디(몸통 마디
+셋을 위아래로 문다). 뒷면에는 개구 둘레 고무 패킹, 우현 문 안쪽 모서리에 맞댐띠가 있다. 좌우 이름은 **포구 방향을 보고**
+정한다(우현 = +X) — 바퀴·잭 이름(`Wheel_L`이 +X)과 기준이 다르니 섞지 말 것.
+
+`test_generate_launcher.py`가 GLB에서 잰다: 닫힌 두 짝이 관 개구를 덮는다 · 여는 내내 어느 정점도 포구 면(포구 테 앞
+−3.54) 뒤로 안 간다 · 다 열리면 관 개구를 앞으로 늘인 통로에 정점이 없다 · 문 윗변이 상부 레일 바닥 아래다. 열림각은
+GLB에 안 실리므로 이 스크립트의 `DOOR_OPEN`과 가상환경 `LAUNCHER_GEOMETRY.doorOpenDeg`를 원문끼리 대조한다.
+가상환경은 처음부터 재생할 때 시각 0에 머물며 문을 연 뒤 발사를 흘린다(`web/world/src/core/launcher.ts`).
+
+**포구가 막혀 있던 것도 같이 고쳤다.** 관 절개를 외피·장갑판·트러니언 스텁이 겹친 메시에 EXACT 불리언으로 걸어 절개
+상자의 앞면(포구 앞 0.35)이 남았고, 라이너 `Box_Tubes`도 닫힌 상자라 앞면이 포구를 덮었다. 지금은 외피만 자른 뒤
+장갑판·스텁을 덧붙이고, 라이너는 포구 쪽이 뚫린 다섯 면을 안쪽으로 향하게 했다(정반사 0 — 관 속이 하늘을 비추지 않는다).
+정점 검사는 모서리가 개구 벽에 걸친 판을 못 보므로 시험은 **면 중심**으로 통로를 가로지르는 면을 잡는다.
+
 ## 움직이는 가동부
 
 각 가동부는 **자기 회전/이동 축을 원점으로 하는 별도 오브젝트**다.
@@ -40,6 +58,7 @@
 | `Turntable` | 방위각 선회 | Z 회전 | `Trailer` |
 | `Cradle` | 고각 상하 | X 회전 | `Turntable` |
 | `Jack_FL` / `FR` / `RL` / `RR` | 아웃리거 전개 | Z 이동(하강) | `Trailer` |
+| `Door_L` / `Door_R` | 포구 문 열림 | Z 회전(수직 경첩) | `Cradle` |
 
 `Cradle`은 `Turntable`의 자식이라, **선회한 다음 그 자세에서 고각을 준다** — 실장비의
 트러니언 거동과 같다. 발사관 본체(외피·측면 장갑판은 `Cradle`에 통합, 캐니스터 내부
@@ -60,13 +79,14 @@
 | `azimuth` | 방위각 [deg], + = 좌현 선회 | −100 … 100 |
 | `elevation` | 고각 [deg], + = 포구 상승 | 0 … 48 |
 | `jack_deploy` | 지지대 0(접힘) → 1(지면 전개) | 0 … 1 |
+| `doors` | 포구 문 0(닫힘) → 1(`DOOR_OPEN` 115° 열림) | 0 … 1 |
 
 `Turntable`·`Cradle`에는 Limit Rotation 컨스트레인트가 걸려 있어 과회전을 막는다.
 
 ## 데모 애니메이션
 
 1–168 프레임(24 fps)에 전개 시퀀스가 키프레임되어 있다: **지지대 전개 → 방위각
-선회 → 고각 상승 → 발사 자세 유지**. 재생하면 세 축이 순서대로 도는 게 보인다.
+선회 → 고각 상승 → 포구 문 열림**(138–158). 재생하면 네 동작이 순서대로 보인다.
 
 ## three.js에서 쓰기 (`launcher.glb`)
 
@@ -83,9 +103,10 @@ GLB로 내보낼 때 각 가동부의 모션을 프레임별로 샘플해 **노�
 | `Turntable` | `rotation.y` | 방위각 선회 |
 | `Cradle` | `rotation.x` | 고각(포구 상승) |
 | `Jack_FL`,`Jack_FR`,`Jack_RL`,`Jack_RR` | `position.y` | 전개(하강 = −y) |
+| `Door_R` (우현 +x) / `Door_L` (좌현 −x) | `rotation.y` | `Door_R`는 **−각**, `Door_L`은 **+각**이 바깥·앞으로 연다 |
 
 계층:
-`LAUNCHER_Root › Trailer › { Wheel_L/R, Jack_×4, Turntable › Cradle › {Box_Tubes, Box_Rails} }`.
+`LAUNCHER_Root › Trailer › { Wheel_L/R, Jack_×4, Turntable › Cradle › {Box_Tubes, Box_Rails, Door_L/R} }`.
 (오브젝트 이름에 점을 안 쓰고 밑줄을 쓴 이유는 glTF/three.js가 노드 이름의 점을 지우기 때문 —
 Blender·three.js에서 같은 이름으로 조회된다.)
 

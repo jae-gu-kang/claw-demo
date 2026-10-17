@@ -39680,7 +39680,10 @@ const LAUNCHER_GEOMETRY = {
   azMax: 100 * Math.PI / 180,
   /** GLB 루트 노드 스케일 — `generate_launcher.py`의 `root.scale`. 로컬 값(위 전부)을
    *  지면 기준 미터로 바꿀 때만 곱한다. 관절 값은 로컬이라 곱하지 않는다. */
-  rootScale: 2
+  rootScale: 2,
+  /** 포구 문 두 짝(`Door_L`·`Door_R`)이 다 열린 각 [deg] — `generate_launcher.py`의 `DOOR_OPEN`(드라이버 상수라
+   *  GLB에는 안 실린다. 두 원문을 `test_generate_launcher.py`가 대조한다). 직각을 넘겨 문이 통로 밖으로 비킨다. */
+  doorOpenDeg: 115
 };
 const VEHICLE_AFT_EXTENT = 1.9;
 const LAUNCHER_SPAN = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ) * LAUNCHER_GEOMETRY.rootScale;
@@ -39753,6 +39756,25 @@ function launcherCaptionNotes(launch, pose2) {
   }
   return notes;
 }
+const DOOR_OPEN_S = 1.2;
+const PRELUDE_S = 1.5;
+const clamp01 = (v2) => Math.min(Math.max(v2, 0), 1);
+function advancePrelude(preT, dtWall, speed) {
+  return Math.min(PRELUDE_S, preT + Math.max(dtWall, 0) * Math.min(Math.max(speed, 0), 1));
+}
+function doorOpenFraction(idx, preT) {
+  if (idx > 0) return 1;
+  const u2 = clamp01(preT / DOOR_OPEN_S);
+  return u2 * u2 * (3 - 2 * u2);
+}
+function doorRotations(f2) {
+  const a = clamp01(f2) * LAUNCHER_GEOMETRY.doorOpenDeg * (Math.PI / 180);
+  return { left: a, right: -a };
+}
+function startsInCanister(onRail0) {
+  return onRail0 !== false;
+}
+const LAUNCHER_DOOR_NOTE = "발사관 문은 표시용입니다 — 시뮬에는 문이 없어, 처음부터 재생하면 문이 열린 뒤(약 1.5초, 시뮬 시각은 0에 머묾) 발사가 흐릅니다.";
 const SURFACE_NOTES = {
   innerOuterShared: "엘레본 내측·외측은 같은 각을 씁니다 — 믹서가 1:1 고정이라 시뮬이 둘을 구분하지 않습니다.",
   rudderShared: "러더 두 면은 같은 각을 씁니다 — 시뮬의 러더 채널이 하나입니다.",
@@ -46117,7 +46139,9 @@ const LAUNCHER_NODES = [
   "Jack_FL",
   "Jack_FR",
   "Jack_RL",
-  "Jack_RR"
+  "Jack_RR",
+  "Door_L",
+  "Door_R"
 ];
 async function loadModel(url, expect, signal) {
   let gltf;
@@ -46243,6 +46267,15 @@ function applyLauncher(model, pose2) {
     const rest = j.userData.restY ?? (j.userData.restY = j.position.y);
     j.position.y = rest + pose2.jackOffsetY;
   }
+  return true;
+}
+function applyLauncherDoors(model, open) {
+  const l2 = model.nodes.get("Door_L");
+  const r2 = model.nodes.get("Door_R");
+  if (!l2 || !r2) return false;
+  const a = doorRotations(open);
+  l2.rotation.y = a.left;
+  r2.rotation.y = a.right;
   return true;
 }
 function placeLauncher(model, siteNed, pose2) {
@@ -47431,6 +47464,11 @@ class SceneController {
   speed = 5;
   fromIdx = 0;
   fromWall = 0;
+  /** 발사관 문을 여닫는가 — 문 있는 발사관을 보이고, 기체가 관 안(레일 위)에서 시작하는 결과일 때만. 아니면 문은
+   *  늘 열려 있고 전주도 없다(core/launcher.ts 「포구 문과 발사 전주」). */
+  doorsOn = false;
+  /** 발사 전주 시각 [s, 0…PRELUDE_S] — 처음부터 재생할 때 시뮬 시각 0에 머물며 문을 연다. PRELUDE_S면 끝났다. */
+  preT = PRELUDE_S;
   // ---- 게임 모드 상태 — 정본은 컨트롤러다(시점·재생과 같은 사유).
   arcade = null;
   gameInput = { turn: 0, pitch: 0, throttle: 0 };
@@ -47735,7 +47773,12 @@ class SceneController {
       showLauncher(this.launcher, site, lp);
       if (lp == null) notes.push("발사 정보가 없어 발사관을 그리지 않습니다.");
       else notes.push(...launcherCaptionNotes(body.meta?.launch, lp));
+      this.doorsOn = lp != null && startsInCanister(body.signals.on_rail?.[0]) && applyLauncherDoors(this.launcher, 0);
+      if (this.doorsOn) notes.push(LAUNCHER_DOOR_NOTE);
+    } else {
+      this.doorsOn = false;
     }
+    this.preT = this.doorsOn ? 0 : PRELUDE_S;
     this.dist = Math.max(sceneExtent(body.signals) * 0.25, 200);
     this.resultNotes = notes;
     this.emitNotes();
@@ -47996,7 +48039,10 @@ class SceneController {
       this.cb.onPlaying(false);
       return;
     }
-    if (playing && this.body && atEnd(this.idx, this.n)) this.idx = 0;
+    if (playing && this.body && atEnd(this.idx, this.n)) {
+      this.idx = 0;
+      this.preT = this.doorsOn ? 0 : PRELUDE_S;
+    }
     this.playing = playing;
     this.fromIdx = this.idx;
     this.fromWall = performance.now();
@@ -48010,9 +48056,14 @@ class SceneController {
   }
   setCursor(idx) {
     this.idx = Math.min(Math.max(Math.round(idx), 0), Math.max(this.n - 1, 0));
+    this.preT = this.idx > 0 || !this.doorsOn ? PRELUDE_S : 0;
     this.fromIdx = this.idx;
     this.fromWall = performance.now();
     this.dirty = true;
+  }
+  /** 발사 전주 중인가 — 재생은 시뮬 시각 0에 머물고 문만 열린다. */
+  inPrelude() {
+    return this.doorsOn && this.idx === 0 && this.preT < PRELUDE_S;
   }
   get cursor() {
     return this.idx;
@@ -48069,7 +48120,14 @@ class SceneController {
       this.drawGame(dtWall, ground);
       return;
     }
-    if (this.playing && this.body && isPlayable(this.body.t)) {
+    if (this.playing && this.body && isPlayable(this.body.t) && this.inPrelude()) {
+      this.preT = advancePrelude(this.preT, dtWall, this.speed);
+      this.dirty = true;
+      if (this.preT >= PRELUDE_S) {
+        this.fromIdx = this.idx;
+        this.fromWall = now;
+      }
+    } else if (this.playing && this.body && isPlayable(this.body.t)) {
       const next = indexAt(this.fromIdx, this.fromWall, now, this.speed, this.dt, this.n);
       if (next !== this.idx) {
         this.idx = next;
@@ -48154,6 +48212,7 @@ class SceneController {
         dtWall
       );
     }
+    if (this.launcher) applyLauncherDoors(this.launcher, this.doorsOn ? doorOpenFraction(i, this.preT) : 1);
     const groundElev = this.groundElevationAt(pos);
     const cam = this.cameraFor(pos, q2, dtWall, groundElev);
     const t2 = body.t[i];

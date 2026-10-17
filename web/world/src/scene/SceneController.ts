@@ -31,7 +31,9 @@ import { refLabel, runProfileRef, siteRunwayWidth, strideFor } from "../lib/repl
 import { runwayDrawing } from "../core/runway.ts";
 import { floorWeight, runwayFloorOf, sameFloor, type RunwayFloor } from "../core/runwayfloor.ts";
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
-import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
+import {
+  LAUNCHER_DOOR_NOTE, PRELUDE_S, advancePrelude, doorOpenFraction, launcherCaptionNotes, launcherPose, startsInCanister,
+} from "../core/launcher.ts";
 import { propellerRate, surfaceDisplayNotes, surfacePose } from "../core/surfaces.ts";
 import { WAVE_NOTES } from "../core/waves.ts";
 import type { Replay } from "../core/types.ts";
@@ -43,7 +45,7 @@ import { SceneHost, createSceneHost, type Marker, type ViewStyle } from "./Scene
 import { buildCoastField } from "../core/coastfield.ts";
 import { buildTerrain } from "./terrain.ts";
 import {
-  LAUNCHER_NODES, applySurfaces, hideVehicle, loadModel,
+  LAUNCHER_NODES, applyLauncherDoors, applySurfaces, hideVehicle, loadModel,
   setVehiclePose, showLauncher, spinPropeller, vehicleDriveNodes, type LoadedModel,
 } from "./models.ts";
 import { SCHEMATIC_NOTE, schematicCaption, vehicleSchematic } from "../lib/vehicleschematic.ts";
@@ -181,6 +183,11 @@ export class SceneController {
   private speed = 5;
   private fromIdx = 0;
   private fromWall = 0;
+  /** 발사관 문을 여닫는가 — 문 있는 발사관을 보이고, 기체가 관 안(레일 위)에서 시작하는 결과일 때만. 아니면 문은
+   *  늘 열려 있고 전주도 없다(core/launcher.ts 「포구 문과 발사 전주」). */
+  private doorsOn = false;
+  /** 발사 전주 시각 [s, 0…PRELUDE_S] — 처음부터 재생할 때 시뮬 시각 0에 머물며 문을 연다. PRELUDE_S면 끝났다. */
+  private preT = PRELUDE_S;
 
   // ---- 게임 모드 상태 — 정본은 컨트롤러다(시점·재생과 같은 사유).
   private arcade: ArcadeState | null = null;
@@ -544,7 +551,13 @@ export class SceneController {
       showLauncher(this.launcher, site, lp);
       if (lp == null) notes.push("발사 정보가 없어 발사관을 그리지 않습니다.");
       else notes.push(...launcherCaptionNotes(body.meta?.launch, lp));
+      // 문은 닫아 두고 시작한다 — 문 없는 옛 GLB면 applyLauncherDoors가 false라 전주도 없다
+      this.doorsOn = lp != null && startsInCanister(body.signals.on_rail?.[0]) && applyLauncherDoors(this.launcher, 0);
+      if (this.doorsOn) notes.push(LAUNCHER_DOOR_NOTE);
+    } else {
+      this.doorsOn = false;
     }
+    this.preT = this.doorsOn ? 0 : PRELUDE_S;
     this.dist = Math.max(sceneExtent(body.signals) * 0.25, 200);
     this.resultNotes = notes;
     this.emitNotes();
@@ -873,7 +886,8 @@ export class SceneController {
       this.cb.onPlaying(false);
       return;
     }
-    if (playing && this.body && atEnd(this.idx, this.n)) this.idx = 0;
+    // 끝에서 다시 재생하면 처음부터다 — 문을 닫고 전주를 다시 탄다
+    if (playing && this.body && atEnd(this.idx, this.n)) { this.idx = 0; this.preT = this.doorsOn ? 0 : PRELUDE_S; }
     this.playing = playing;
     this.fromIdx = this.idx;
     this.fromWall = performance.now();
@@ -889,9 +903,16 @@ export class SceneController {
 
   setCursor(idx: number): void {
     this.idx = Math.min(Math.max(Math.round(idx), 0), Math.max(this.n - 1, 0));
+    // 0으로 끌면 문이 닫히고(재생하면 전주부터), 0을 지나면 열린 문이다 — 커서가 어디 있든 화면이 같은 말을 한다
+    this.preT = this.idx > 0 || !this.doorsOn ? PRELUDE_S : 0;
     this.fromIdx = this.idx;
     this.fromWall = performance.now();
     this.dirty = true;
+  }
+
+  /** 발사 전주 중인가 — 재생은 시뮬 시각 0에 머물고 문만 열린다. */
+  private inPrelude(): boolean {
+    return this.doorsOn && this.idx === 0 && this.preT < PRELUDE_S;
   }
 
   get cursor(): number { return this.idx; }
@@ -951,7 +972,12 @@ export class SceneController {
       return;
     }
 
-    if (this.playing && this.body && isPlayable(this.body.t)) {
+    if (this.playing && this.body && isPlayable(this.body.t) && this.inPrelude()) {
+      // 전주 — 커서를 세우고 문만 연다. 끝나는 순간부터 커서 시계를 잰다(아니면 indexAt이 전주만큼 표본을 건너뛴다)
+      this.preT = advancePrelude(this.preT, dtWall, this.speed);
+      this.dirty = true;
+      if (this.preT >= PRELUDE_S) { this.fromIdx = this.idx; this.fromWall = now; }
+    } else if (this.playing && this.body && isPlayable(this.body.t)) {
       const next = indexAt(this.fromIdx, this.fromWall, now, this.speed, this.dt, this.n);
       if (next !== this.idx) { this.idx = next; this.dirty = true; }
       if (atEnd(this.idx, this.n)) {
@@ -1026,6 +1052,8 @@ export class SceneController {
       spinPropeller(this.vehicle,
         propellerRate(body.signals.thr_l?.[i], body.signals.thr_r?.[i]), dtWall);
     }
+
+    if (this.launcher) applyLauncherDoors(this.launcher, this.doorsOn ? doorOpenFraction(i, this.preT) : 1);
 
     const groundElev = this.groundElevationAt(pos);
     const cam = this.cameraFor(pos, q, dtWall, groundElev);

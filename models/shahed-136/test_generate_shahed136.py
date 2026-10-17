@@ -73,6 +73,24 @@ class Glb:
                 for p in mesh["primitives"]]
         return [max(m[k] for m in maxs) for k in range(3)]
 
+    def positions(self, name):
+        """노드 메시(서브메시 전부)의 POSITION — 노드 로컬."""
+        mesh = self.json["meshes"][self.nodes[self.index[name]]["mesh"]]
+        return [p for prim in mesh["primitives"] for p in self.accessor(prim["attributes"]["POSITION"])]
+
+    def offset(self, name):
+        """기체 원점에서 노드 원점까지 — 자신과 조상의 이동을 더한다. 쉬는 자세의 회전·스케일이 항등이라는
+        전제를 확인한다(타면 노드는 구운 1프레임 = 0°라 항등이다) — 깨지면 이 덧셈이 틀리므로 크게 실패한다."""
+        parent = {c: i for i, n in enumerate(self.nodes) for c in n.get("children", [])}
+        out, j = [0.0, 0.0, 0.0], self.index[name]
+        while j is not None:
+            n = self.nodes[j]
+            assert n.get("rotation", [0, 0, 0, 1]) == pytest.approx([0, 0, 0, 1], abs=1e-6), n.get("name")
+            assert n.get("scale", [1, 1, 1]) == pytest.approx([1, 1, 1], abs=1e-6), n.get("name")
+            out = [a + b for a, b in zip(out, n.get("translation", [0.0, 0.0, 0.0]))]
+            j = parent.get(j)
+        return out
+
     def materials_of(self, name):
         """노드 메시가 쓰는 재질 이름 — 안 쓰인 슬롯은 내보내기에서 빠지므로 실제로 칠해진 것만 남는다."""
         mesh = self.json["meshes"][self.nodes[self.index[name]]["mesh"]]
@@ -290,3 +308,118 @@ def test_eoir_tilt_turns_boresight_about_lateral_axis(eoir):
     a = math.radians(-40)                                                       # 데모 키 138
     look = rotate(eoir.rotation_at("EOIR_Tilt", frame_time(138)), BORESIGHT)
     assert look == pytest.approx((0.0, math.sin(a), -math.cos(a)), abs=0.01)   # + = 위(+Y)
+
+
+# ---------------------------------------------------------------- 러더 쓸림 · 착륙 스키드
+DELTA_DEMO = os.path.join(HERE, "..", "..", "engine", "claw", "profile", "examples", "delta_demo.json")
+
+
+def _source():
+    with open(os.path.join(HERE, "generate_shahed136.py"), encoding="utf-8") as f:
+        return f.read()
+
+
+def _surface_limits():
+    """러더·엘레본 리밋 [deg] — `limit_rot`의 기본값을 그대로 쓰는지까지 소스에서 읽는다(리밋은 .blend에만 있다)."""
+    src = _source()
+    m = re.search(r"def limit_rot\(ob, axis, lo=(-?[\d.]+), hi=(-?[\d.]+)\)", src)
+    assert m, "limit_rot 정의를 못 찾았다"
+    assert "limit_rot(rudders[tag], 'z')" in src and "limit_rot(ob, 'x')" in src, "러더·엘레본이 기본 리밋을 안 쓴다"
+    return float(m.group(1)), float(m.group(2))
+
+
+def _hull(pts):
+    """2D 볼록 껍질(반시계)."""
+    pts = sorted(set(pts))
+    if len(pts) < 3:
+        return pts
+
+    def half(seq):
+        out = []
+        for p in seq:
+            while len(out) >= 2 and ((out[-1][0] - out[-2][0]) * (p[1] - out[-2][1])
+                                     - (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])) <= 0:
+                out.pop()
+            out.append(p)
+        return out[:-1]
+    return half(pts) + half(reversed(pts))
+
+
+def _distance_to_convex(p, poly):
+    """점에서 볼록 다각형(반시계)까지 — 안이면 0."""
+    inside, best = True, math.inf
+    for a, b in zip(poly, poly[1:] + poly[:1]):
+        ex, ez = b[0] - a[0], b[1] - a[1]
+        if ex * (p[1] - a[1]) - ez * (p[0] - a[0]) < 0:
+            inside = False
+        t = max(0.0, min(1.0, ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez) / (ex * ex + ez * ez)))
+        best = min(best, math.hypot(p[0] - a[0] - t * ex, p[1] - a[1] - t * ez))
+    return 0.0 if inside else best
+
+
+def _rudder_sweep_clearance(g, tag):
+    """러더가 리밋 전 구간을 쓸 때 고정면(날개·핀)과 엘레본(리밋 양끝·중립)까지 가장 가까운 거리 [m].
+
+    러더는 힌지(로컬 y축 = 수직) 둘레로만 돌므로 평면 문제다: 러더 단면(정점의 xz 볼록 껍질)을 0.25° 간격으로
+    돌리며, 러더 높이 범위 안에 있는 상대 정점까지의 거리를 잰다. 껍질 안에 든 정점이 있으면 0이다."""
+    lo, hi = _surface_limits()
+    rud = "Rudder_" + tag
+    h = g.offset(rud)
+    own = g.positions(rud)
+    y0, y1 = min(p[1] for p in own), max(p[1] for p in own)
+    section = _hull([(p[0], p[2]) for p in own])
+    reach = max(math.hypot(x, z) for x, z in section) + 0.03
+
+    others = []
+    for node in ("Wing", "Fin_" + tag):
+        o = g.offset(node)
+        others += [(o[0] + x, o[1] + y, o[2] + z) for x, y, z in g.positions(node)]
+    for seg in ("In", "Out"):
+        node = "Elevon_%s_%s" % (seg, tag)
+        o, pts = g.offset(node), g.positions(node)
+        for deg in (lo, 0.0, hi):                                # 엘레본은 x축 둘레 — x는 안 바뀐다
+            c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+            others += [(o[0] + x, o[1] + c * y - s * z, o[2] + s * y + c * z) for x, y, z in pts]
+    near = [(x - h[0], z - h[2]) for x, y, z in others
+            if h[1] + y0 - 0.01 <= y <= h[1] + y1 + 0.01 and math.hypot(x - h[0], z - h[2]) < reach]
+    assert near, "러더 둘레에 비교할 정점이 없다 — 노드 이름이 바뀌었나"
+    best = math.inf
+    for k in range(int(lo * 4), int(hi * 4) + 1):
+        a = math.radians(k / 4)
+        c, s = math.cos(a), math.sin(a)
+        poly = [(x * c + z * s, -x * s + z * c) for x, z in section]    # glTF y축 둘레 회전
+        best = min(best, min(_distance_to_convex(p, poly) for p in near))
+    return best
+
+
+@pytest.mark.parametrize("name", ["shahed136.glb", "shahed136_eoir.glb"])
+@pytest.mark.parametrize("tag", ["L", "R"])
+def test_rudder_sweeps_clear_of_wing_fin_and_elevons(name, tag):
+    # 러더 힌지(y −1.383)가 날개 뒷전(−1.45)보다 앞이라, 날개 끝 고정 뒷전이 러더가 쓰는 자리에 남아 있으면
+    # 러더가 돌 때 그것을 뚫고 지나간다(사용자 지적). 날개는 힌지 뒤를 홈으로 비우고, 아웃보드 엘레본 끝은 그
+    # 홈 안쪽에 남는다. 2 mm는 힌지 틈 — 그보다 붙으면 확대 화면에서 맞닿아 보인다.
+    assert _rudder_sweep_clearance(load(name), tag) >= 0.002
+
+
+def _skid_contacts():
+    with open(DELTA_DEMO, encoding="utf-8") as f:
+        return json.load(f)["ground"]["skid"]["contacts"]
+
+
+@pytest.mark.parametrize("name", ["shahed136.glb", "shahed136_eoir.glb"])
+def test_landing_skids_touch_down_at_the_profile_contacts(name):
+    # 예제 기체 문서(delta_demo.json — 두 GLB의 기체)의 스키드 접촉점(FRD, CG 기준)이 시뮬의 접지점이다. 화면의
+    # 스키드 바닥이 그 자리에 있어야 착지·활주에서 기체가 땅에 떠 있거나 묻히지 않는다. 모델 원점 = CG.
+    g = load(name)
+    assert g.parent_of("Landing_Skids") == "Fuselage"
+    o = g.offset("Landing_Skids")
+    pts = [(o[0] + x, o[1] + y, o[2] + z) for x, y, z in g.positions("Landing_Skids")]
+    contacts = _skid_contacts()
+    for fx, fy, fz in contacts:
+        cx, cy, cz = fy, -fz, -fx                                # FRD → glTF (우현 x, 위 y, 후방 z)
+        # 바닥(접촉점 높이 3 mm 안의 정점)이 접촉점 앞뒤를 덮는다 — 정점은 판의 모서리에만 있으므로 구간으로 본다
+        sole = [p[2] for p in pts if abs(p[0] - cx) < 0.02 and abs(p[2] - cz) < 0.10 and abs(p[1] - cy) < 0.003]
+        assert sole, "접촉점 %s 아래에 스키드 바닥이 없다" % ((fx, fy, fz),)
+        assert min(sole) < cz < max(sole)
+    assert min(p[1] for p in pts) >= min(-fz for _, _, fz in contacts) - 0.003   # 접촉점보다 낮은 데가 없다
+    assert {"Skid_Tube", "Skid_Shoe"} <= g.materials_of("Landing_Skids")

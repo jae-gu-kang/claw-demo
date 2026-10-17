@@ -81,6 +81,9 @@ export const LAUNCHER_GEOMETRY = {
   /** GLB 루트 노드 스케일 — `generate_launcher.py`의 `root.scale`. 로컬 값(위 전부)을
    *  지면 기준 미터로 바꿀 때만 곱한다. 관절 값은 로컬이라 곱하지 않는다. */
   rootScale: 2.0,
+  /** 포구 문 두 짝(`Door_L`·`Door_R`)이 다 열린 각 [deg] — `generate_launcher.py`의 `DOOR_OPEN`(드라이버 상수라
+   *  GLB에는 안 실린다. 두 원문을 `test_generate_launcher.py`가 대조한다). 직각을 넘겨 문이 통로 밖으로 비킨다. */
+  doorOpenDeg: 115,
 } as const;
 
 /** 기체(`shahed-136/shahed136.glb`) 원점(≈ 무게중심)에서 꼬리·프로펠러 끝까지 로컬
@@ -222,3 +225,48 @@ export function launcherCaptionNotes(
   }
   return notes;
 }
+
+// ---------------------------------------------------------------- 포구 문과 발사 전주
+//
+// 시뮬에는 문이 없다. 레일 발사는 시각 0에 바로 가속해 0.6 s 안에 끝나므로(데모 결과 실측 — 기수가 포구에 닿는 데
+// 약 0.36 s), 문을 시각 0부터 열면 한 프레임 만에 튀어 열린다. 그래서 **처음부터 재생할 때만** 시뮬 시각 0에 머무는
+// 전주(前奏)를 두어 문을 먼저 열고, 그다음 발사를 흘린다. 커서가 0을 지난 뒤엔 문은 늘 열려 있다 — 커서를 끌어
+// 어느 시점으로 가도 화면이 같은 말을 한다. 전주는 벽시계로 돈다(시뮬 시각이 아니다) — 캡션이 밝힌다.
+
+/** 문이 다 열리는 시간 [s, 벽시계·배속 1]. */
+export const DOOR_OPEN_S = 1.2;
+/** 전주 길이 [s] — 문이 다 열리고 잠깐 선 뒤 발사한다. 멈추기도 전에 나오면 기체가 문을 쳐 내는 것처럼 보인다. */
+export const PRELUDE_S = 1.5;
+
+const clamp01 = (v: number): number => Math.min(Math.max(v, 0), 1);
+
+/** 전주 시각을 한 프레임 진행한다. **배속은 1배까지만 탄다** — 기본 5×로 돌리면 문이 0.3 s에 튀어 열린다. 느린
+ *  배속(0.5×)은 그대로 느리게. 벽시계가 뒤로 가도(탭 복귀 등) 되감지 않는다. */
+export function advancePrelude(preT: number, dtWall: number, speed: number): number {
+  return Math.min(PRELUDE_S, preT + Math.max(dtWall, 0) * Math.min(Math.max(speed, 0), 1));
+}
+
+/** 문 열림 0(닫힘)…1(다 열림). 시뮬 표본 `idx`가 0을 지났으면 1, 아니면 전주 시각을 따라 매끄럽게(smoothstep)
+ *  — 액추에이터가 서서히 밀고 서서히 세운다. */
+export function doorOpenFraction(idx: number, preT: number): number {
+  if (idx > 0) return 1;
+  const u = clamp01(preT / DOOR_OPEN_S);
+  return u * u * (3 - 2 * u);
+}
+
+/** 열림 → 두 짝의 three `rotation.y` [rad]. 경첩이 수직(로컬 Y)이고 포구는 로컬 −Z다: 우현(+x) 문은 **−각**,
+ *  좌현(−x) 문은 **+각**이 바깥·앞으로 연다(테스트가 회전을 실제로 적용해 확인한다). */
+export function doorRotations(f: number): { left: number; right: number } {
+  const a = clamp01(f) * LAUNCHER_GEOMETRY.doorOpenDeg * (Math.PI / 180);
+  return { left: a, right: -a };
+}
+
+/** 첫 표본에서 기체가 관 안(레일 위)인가 — 아니면 문을 닫아 둘 까닭이 없다(이미 날고 있는 결과). 레일 표지가
+ *  없는 옛 결과는 `meta.launch`가 있다는 것 자체를 믿는다(발사 정보가 있으면 시각 0은 레일 위다). */
+export function startsInCanister(onRail0: boolean | null | undefined): boolean {
+  return onRail0 !== false;
+}
+
+/** 문이 있는 발사관을 보일 때 캡션이 밝히는 줄 — 문과 전주는 시뮬에 없는 표시다. */
+export const LAUNCHER_DOOR_NOTE =
+  "발사관 문은 표시용입니다 — 시뮬에는 문이 없어, 처음부터 재생하면 문이 열린 뒤(약 1.5초, 시뮬 시각은 0에 머묾) 발사가 흐릅니다.";

@@ -156,11 +156,13 @@ def shade_smooth(ob, angle_deg=35.0):
         me.set_sharp_from_angle(angle=math.radians(angle_deg))
 
 
-def finish(name, bm, mat, collection, pivot=(0, 0, 0), smooth=False):
-    """bmesh를 오브젝트로. pivot을 원점으로 삼아(로컬화) 회전·이동 축을 맞춘다. mat은 재질 하나 또는 슬롯 목록."""
+def finish(name, bm, mat, collection, pivot=(0, 0, 0), smooth=False, recalc=True):
+    """bmesh를 오브젝트로. pivot을 원점으로 삼아(로컬화) 회전·이동 축을 맞춘다. mat은 재질 하나 또는 슬롯 목록.
+    recalc=False는 면 방향을 만든 그대로 둔다 — 안에서 보는 열린 껍질(관 라이너)은 바깥을 보게 뒤집히면 안 보인다."""
     if any(pivot):
         bmesh.ops.translate(bm, verts=bm.verts, vec=(-pivot[0], -pivot[1], -pivot[2]))
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    if recalc:
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
@@ -196,6 +198,10 @@ MAT_FRAME = make_mat("LauncherFrame", (0.125, 0.140, 0.076), rough=0.60)   # 짙
 MAT_DARK = make_mat("DarkDetail", (0.055, 0.058, 0.062), rough=0.45)       # 히치·커넥터·전선관
 MAT_METAL = make_mat("Metal", (0.340, 0.350, 0.330), rough=0.40, metal=0.7)  # 잭·레일·볼트
 MAT_TUBE = make_mat("CanisterInner", (0.022, 0.024, 0.028), rough=0.72)    # 발사관 내부(암부)
+try:                                    # 관 속은 하늘을 비추지 않는다 — 환경광 반사(정반사)를 끈다(glTF KHR_materials_specular)
+    MAT_TUBE.node_tree.nodes["Principled BSDF"].inputs["Specular IOR Level"].default_value = 0.0
+except KeyError:                        # 4.0 이전 이름
+    MAT_TUBE.node_tree.nodes["Principled BSDF"].inputs["Specular"].default_value = 0.0
 # 디테일 재질 — 스텐실·타이어·램프 (test_generate_launcher.py가 GLB에 실렸는지 본다)
 MAT_MARK = make_mat("Launcher_Marking", (0.700, 0.690, 0.620), rough=0.70)   # 바랜 흰 스텐실
 MAT_TYRE = make_mat("Tyre", (0.030, 0.030, 0.032), rough=0.88)
@@ -420,21 +426,41 @@ BY0, BY1 = -2.10, 1.70       # 박스 뒤·앞(포구) — 길이 2배 (지면 �
 # 단일 대형 캐니스터 개구. 지면 기준 개구 5.3×1.8 m·내부 길이 7.2 m — 기체(스팬 2.5 m·
 # 전장 3.65 m)가 통째로 들어가고도 남는다. 관 뒤끝은 0.15 두께 벽으로 막힌 폐쇄 브리치.
 TUBE_HX, TUBE_HZ = 1.32, 0.42   # 개구 반폭·반높이 (확대 전 로컬)
+# 포구 문 — 좌우 두 짝, 바깥 앞모서리의 수직 경첩으로 바깥·앞으로 연다(위로 여는 한 짝은 포구 앞으로 뻗은 상부 레일에
+# 걸린다). 경첩축은 상자 바깥 모서리(BX) 밖·문 두께 가운데 — 문이 포구 면 뒤로 돌아 들어가지 않는다.
+# DOOR_OPEN은 가상환경 LAUNCHER_GEOMETRY.doorOpenDeg와 같아야 한다(test_generate_launcher.py가 대조한다).
+DOOR_OPEN = 115.0               # 다 열린 각 [deg] — 직각을 넘겨 문이 통로 밖으로 비킨다
+DOOR_Y0, DOOR_T = BY1 + 0.05, 0.04          # 문 뒷면(포구 테 볼트 머리 BY1+0.047 앞)·두께
+HX, HY = BX + 0.025, DOOR_Y0 + DOOR_T / 2   # 경첩축 (±HX, HY) — 수직
+DOOR_Z0, DOOR_Z1 = TRUN - BZ + 0.025, TRUN + BZ - 0.025   # 문 아래·위 — 위는 상부 레일 바닥(TRUN+BZ−0.005) 아래
+DOOR_HINGES = (TRUN - 0.33, TRUN, TRUN + 0.33)            # 경첩 셋의 가운데 높이(몸통 마디 ±0.04, 문 마디 그 위아래)
 
 bm = bmesh.new()
 kit.rounded_box(bm, (-BX, BY0, TRUN - BZ), (BX, BY1, TRUN + BZ), 0.035)            # 외피 — 모서리를 굴린다
+cradle = finish("Cradle", bm, [MAT_OLIVE, MAT_METAL, MAT_MARK, MAT_DARK], col_model, pivot=CR_PIV, smooth=True)
+
+# 포구(+Y)에 단일 관통구 (불리언) — 뒤끝(-1.95)은 박스 뒤(-2.10)에 못 미쳐 브리치가 남는다. **외피 하나만 자른다** —
+# 장갑판·트러니언 스텁(겹친 껍질)까지 얹은 채 EXACT로 자르면 절개 상자의 앞면(포구 앞 2.05)이 남아 포구를 막았다
+# (test_nothing_on_the_cradle_caps_the_bore_or_its_exit). 그 둘은 개구에 안 닿으므로 자른 뒤에 덧붙인다
+bm = bmesh.new()
+add_box(bm, (-TUBE_HX, -1.95, TRUN - TUBE_HZ), (TUBE_HX, 2.05, TRUN + TUBE_HZ))
+cutter = finish("cut_tube", bm, MAT_OLIVE, col_model)
+boolean_diff(cradle, cutter)
+bm = bmesh.new()
+bm.from_mesh(cradle.data)
+start = len(bm.faces)
 for sx in (1, -1):
     x_in = sx * BX
     kit.rounded_box(bm, (min(x_in, x_in + sx * 0.08), -1.90, TRUN - 0.44),
                     (max(x_in, x_in + sx * 0.08), 1.10, TRUN + 0.48), 0.015)           # 측면 장갑판
     cylinder(bm, (sx * BX, -1.80, TRUN), (sx * 1.60, -1.80, TRUN), 0.15, 0.15, 'x', n=16)  # 트러니언 스텁
-cradle = finish("Cradle", bm, [MAT_OLIVE, MAT_METAL, MAT_MARK, MAT_DARK], col_model, pivot=CR_PIV, smooth=True)
-
-# 포구(+Y)에 단일 관통구 (불리언) — 뒤끝(-1.95)은 박스 뒤(-2.10)에 못 미쳐 브리치가 남는다
-bm = bmesh.new()
-add_box(bm, (-TUBE_HX, -1.95, TRUN - TUBE_HZ), (TUBE_HX, 2.05, TRUN + TUBE_HZ))
-cutter = finish("cut_tube", bm, MAT_OLIVE, col_model)
-boolean_diff(cradle, cutter)
+bm.faces.ensure_lookup_table()
+added = [bm.faces[i] for i in range(start, len(bm.faces))]
+bmesh.ops.translate(bm, verts=list({v for f in added for v in f.verts}), vec=(-CR_PIV[0], -CR_PIV[1], -CR_PIV[2]))
+bmesh.ops.recalc_face_normals(bm, faces=added)
+bm.to_mesh(cradle.data)
+bm.free()
+shade_smooth(cradle)
 
 
 def cradle_details(bm, surf, slot, L):
@@ -452,7 +478,7 @@ def cradle_details(bm, surf, slot, L):
     for y in (-1.35, -0.25, 0.85):
         box((-BX + 0.04, y - 0.03, TRUN + BZ - 0.01), (BX - 0.04, y + 0.03, TRUN + BZ + 0.022), 0.008, olive)
         box((-BX + 0.04, y - 0.03, TRUN - BZ - 0.008), (BX - 0.04, y + 0.03, TRUN - BZ + 0.01), 0.004, olive)
-    # 포구 테 — 개구 둘레로 3.5 cm 솟은 틀 + 볼트, 위 앞모서리에 덮개 경첩
+    # 포구 테 — 개구 둘레로 3.5 cm 솟은 틀 + 볼트. 문 경첩(몸통 쪽)은 좌우 앞모서리에
     rim = [((-BX + 0.03, TRUN + TUBE_HZ + 0.005), (BX - 0.03, TRUN + BZ - 0.03)),
            ((-BX + 0.03, TRUN - BZ + 0.03), (BX - 0.03, TRUN - TUBE_HZ - 0.005)),
            ((TUBE_HX + 0.005, TRUN - TUBE_HZ - 0.005), (BX - 0.03, TRUN + TUBE_HZ + 0.005)),
@@ -462,9 +488,16 @@ def cradle_details(bm, surf, slot, L):
     for x in kit.spaced((-1.30, 0, 0), (1.30, 0, 0), 0.26):
         for z in (TRUN + 0.47, TRUN - 0.47):
             bolt_at((x[0], BY1 + 0.035, z), (0, 1, 0))
-    for x0, x1 in ((-1.30, -0.95), (-0.25, 0.25), (0.95, 1.30)):
-        kit.paint(kit.lathe(bm, L((x0, BY1 + 0.005, TRUN + BZ - 0.004)), (1, 0, 0), [(0.0, 0.026), (x1 - x0, 0.026)],
-                            n=12), metal, smooth=True)
+    # 문 경첩 몸통 쪽 — 옆면에서 경첩축까지 뻗은 받침 + 가운데 마디(문 쪽 마디가 위아래로 문다). 받침은 문 뒷면(BY1+0.05)
+    # 뒤·문 안쪽 모서리(HX−0.033) 바깥이라, 문이 어느 각에 있어도 닿지 않는다(문 모서리는 축에서 0.039 밖을 돈다)
+    for sx in (1.0, -1.0):
+        for zc in DOOR_HINGES:
+            x0, x1 = sorted((sx * (BX - 0.004), sx * (HX + 0.010)))
+            box((x0, BY1 - 0.16, zc - 0.04), (x1, HY, zc + 0.04), 0.004, olive)
+            kit.paint(kit.lathe(bm, L((sx * HX, HY, zc - 0.04)), (0, 0, 1), [(0.0, 0.024), (0.08, 0.024)], n=12),
+                      metal, smooth=True)
+            for dz in (-0.022, 0.022):
+                bolt_at((sx * (HX + 0.010), BY1 - 0.10, zc + dz), (sx, 0, 0), r=0.009, h=0.007)
     # 인양 고리 — 윗면 네 모서리
     for x in (-1.25, 1.25):
         for y in (-1.95, 1.50):
@@ -507,11 +540,23 @@ def cradle_details(bm, surf, slot, L):
 
 decorate(cradle, cradle_details)
 
-# 캐니스터 내부 라이너(암부, 분리 오브젝트)
+# 캐니스터 내부 라이너(암부, 분리 오브젝트) — **포구 쪽이 뚫린** 다섯 면, 면은 관 안쪽을 본다. 닫힌 상자였을 때는 앞면이
+# 포구를 판자처럼 막아 문이 열려도 관 속이 안 보였다(하늘 환경광을 받아 올리브 판으로 읽혔다). bbox(포구·관 뒤끝)는 그대로다
 bm = bmesh.new()
-add_box(bm, (-TUBE_HX + 0.025, -1.93, TRUN - TUBE_HZ + 0.025),
-        (TUBE_HX - 0.025, 1.68, TRUN + TUBE_HZ - 0.025))
-box_tubes = finish("Box_Tubes", bm, MAT_TUBE, col_model, pivot=CR_PIV)
+lx0, lx1, ly0, ly1 = -TUBE_HX + 0.025, TUBE_HX - 0.025, -1.93, 1.68
+lz0, lz1 = TRUN - TUBE_HZ + 0.025, TRUN + TUBE_HZ - 0.025
+v = {(i, j, k): bm.verts.new((x, y, z)) for i, x in enumerate((lx0, lx1)) for j, y in enumerate((ly0, ly1))
+     for k, z in enumerate((lz0, lz1))}
+for quad in (((0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)),          # 뒤(브리치)
+             ((0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0)),          # 바닥
+             ((0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)),          # 천장
+             ((0, 0, 0), (0, 0, 1), (0, 1, 1), (0, 1, 0)),          # 좌
+             ((1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1))):         # 우
+    f = bm.faces.new([v[q] for q in quad])
+    f.normal_update()
+    if f.normal.dot(f.calc_center_median() - Vector((0.0, 0.5 * (ly0 + ly1), TRUN))) > 0:
+        f.normal_flip()                                          # 안쪽을 보게
+box_tubes = finish("Box_Tubes", bm, MAT_TUBE, col_model, pivot=CR_PIV, recalc=False)
 
 # 상부 발사 레일 2줄 (금속, 포구 앞으로 돌출)
 bm = bmesh.new()
@@ -520,6 +565,62 @@ for sx in (0.68, -0.68):
 for y in (-0.8, 0.6, 1.9):
     beam(bm, (-0.68, y, TRUN + BZ + 0.05), (0.68, y, TRUN + BZ + 0.05), 0.05, 0.06)
 box_rails = finish("Box_Rails", bm, MAT_METAL, col_model, pivot=CR_PIV, smooth=True)
+
+# 포구 문 두 짝(분리 오브젝트, 원점 = 경첩축) — 우현(+X) Door_R · 좌현(−X) Door_L, 포구 방향을 보고. 닫히면 가운데 1.2 cm 틈만
+# 남기고 관 개구를 덮는다. 앞면: 둘레 테 + 볼트, 가로 보강 둘, 「DANGER」, 경첩 쪽 띠와 마디. 뒷면: 개구 둘레 고무 패킹.
+# 우현 문 안쪽 모서리의 고무 맞댐띠가 좌현 문 테 위로 겹친다(같은 각으로 열리면 두 짝이 서로 멀어져 닿지 않는다).
+DOOR_MATS = [MAT_OLIVE, MAT_METAL, MAT_MARK, MAT_DARK]
+D_OL, D_MT, D_MK, D_DK = range(len(DOOR_MATS))
+DOOR_FRONT = DOOR_Y0 + DOOR_T
+doors = {}
+for sx, tag in ((1.0, "R"), (-1.0, "L")):
+    def xs(a, b, sx=sx):
+        """경첩 쪽에서 잰 바깥 좌표 쌍 → 정렬된 (x0, x1) — 좌우 대칭을 한 줄로 쓴다."""
+        return sorted((sx * a, sx * b))
+    bm = bmesh.new()
+    xi, xo = 0.006, BX - 0.008                                   # 문짝 안쪽·바깥 모서리(경첩 쪽 HX−0.033)
+    (x0, x1) = xs(xi, xo)
+    kit.paint(kit.rounded_box(bm, (x0, DOOR_Y0, DOOR_Z0), (x1, DOOR_FRONT, DOOR_Z1), 0.008), D_OL)
+    # 둘레 테(1.2 cm 솟음) + 볼트
+    lip = DOOR_FRONT + 0.012
+    for (a, b, z0, z1) in ((xi, xo, DOOR_Z1 - 0.045, DOOR_Z1), (xi, xo, DOOR_Z0, DOOR_Z0 + 0.045),
+                           (xi, xi + 0.045, DOOR_Z0, DOOR_Z1), (xo - 0.045, xo, DOOR_Z0, DOOR_Z1)):
+        (p0, p1) = xs(a, b)
+        kit.paint(kit.rounded_box(bm, (p0, DOOR_FRONT - 0.002, z0), (p1, lip, z1), 0.004), D_OL)
+    ring = [(xi + 0.0225, DOOR_Z0 + 0.0225), (xo - 0.0225, DOOR_Z0 + 0.0225),
+            (xo - 0.0225, DOOR_Z1 - 0.0225), (xi + 0.0225, DOOR_Z1 - 0.0225)]
+    for u, z in kit.resample_closed(ring, 22):
+        kit.paint(hexbolt(bm, (sx * u, lip, z), (0, 1, 0), r=0.010, h=0.008), D_MT)
+    # 가로 보강 둘 — 글자 칸(TRUN ± 0.2)을 비워 위아래에
+    for zr in (TRUN - 0.25, TRUN + 0.25):
+        (p0, p1) = xs(xi + 0.06, xo - 0.06)
+        kit.paint(kit.rounded_box(bm, (p0, DOOR_FRONT - 0.002, zr - 0.03), (p1, DOOR_FRONT + 0.025, zr + 0.03), 0.008),
+                  D_OL)
+    # 경첩 문 쪽 — 마디 둘(몸통 마디 위아래) + 앞면 띠(마디까지 뻗는다)
+    for zc in DOOR_HINGES:
+        for z0, z1 in ((zc - 0.12, zc - 0.045), (zc + 0.045, zc + 0.12)):
+            kit.paint(kit.lathe(bm, (sx * HX, HY, z0), (0, 0, 1), [(0.0, 0.024), (z1 - z0, 0.024)], n=12), D_MT,
+                      smooth=True)
+            (p0, p1) = xs(HX - 0.32, HX)
+            kit.paint(kit.rounded_box(bm, (p0, DOOR_FRONT - 0.002, z0), (p1, lip + 0.006, z1), 0.004), D_MT)
+            kit.paint(hexbolt(bm, (sx * (HX - 0.22), lip + 0.006, 0.5 * (z0 + z1)), (0, 1, 0), r=0.009, h=0.007), D_MT)
+    # 뒷면 고무 패킹 — 개구 둘레(포구 테 볼트 줄 TRUN±0.47 안쪽). 포구 테 앞면(BY1+0.035)과 0.7 cm 띄운다
+    for (a, b, z0, z1) in ((0.0, TUBE_HX + 0.03, TRUN + TUBE_HZ, TRUN + TUBE_HZ + 0.03),
+                           (0.0, TUBE_HX + 0.03, TRUN - TUBE_HZ - 0.03, TRUN - TUBE_HZ),
+                           (TUBE_HX, TUBE_HX + 0.03, TRUN - TUBE_HZ - 0.03, TRUN + TUBE_HZ + 0.03)):
+        (p0, p1) = xs(max(a, xi), b)
+        kit.paint(kit.rounded_box(bm, (p0, BY1 + 0.042, z0), (p1, DOOR_Y0 + 0.002, z1), 0.004), D_DK)
+    if sx > 0:                                                    # 맞댐띠 — 우현 문에만, 좌현 문 테 위로 겹친다
+        kit.paint(kit.rounded_box(bm, (-0.030, lip, DOOR_Z0 + 0.01), (0.040, lip + 0.010, DOOR_Z1 - 0.01), 0.004), D_DK)
+    ob = finish("Door_" + tag, bm, DOOR_MATS, col_model, pivot=(sx * HX, HY, TRUN), smooth=True)
+
+    def door_marks(bm, surf, slot, L, sx=sx):
+        u, v, d = (-1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, -1.0, 0.0)   # 앞에서 읽힌다(u×v = +Y 바깥)
+        for text, cap, z in (("DANGER", 0.090, TRUN + 0.075), ("KEEP CLEAR OF DOORS", 0.032, TRUN - 0.075)):
+            kit.paint(kit.stencil(bm, surf, text, FONT, cap, (L((sx * 0.70, BY1 + 0.5, z)), u, v), d, spacing=1.06),
+                      slot(MAT_MARK))
+    decorate(ob, door_marks)
+    doors[tag] = ob
 
 # ---------------------------------------------------------------- 루트 엠프티 + 계층
 root = bpy.data.objects.new("LAUNCHER_Root", None)
@@ -543,6 +644,8 @@ parent_to(turntable, trailer)
 parent_to(cradle, turntable)
 parent_to(box_tubes, cradle)
 parent_to(box_rails, cradle)
+for tag in doors:
+    parent_to(doors[tag], cradle)
 
 # **전체 2.0배** — 로컬 좌표를 지면 미터의 절반으로 쓰는 규약. 반드시 부모화 **뒤에**
 # 건다: parent_to가 부모 월드행렬의 역을 캡처하므로, 스케일을 먼저 걸면 자식이 0.5를
@@ -557,6 +660,7 @@ PROPS = [
     ("azimuth", 0.0, -100, 100, "방위각 [deg], + = 좌현 선회"),
     ("elevation", 0.0, 0, 48, "고각 [deg], + = 포구 상승"),
     ("jack_deploy", 0.0, 0, 1, "지지대 전개 0(접힘)→1(지면)"),
+    ("doors", 0.0, 0, 1, "포구 문 0(닫힘)→1(%g° 열림)" % DOOR_OPEN),
 ]
 for name, default, lo, hi, desc in PROPS:
     root[name] = float(default)
@@ -594,6 +698,9 @@ add_rot_driver(cradle, 0, 'radians(x)', "elevation")
 # 지지대: 잭 로컬 Z 하강 (슬리브 상단에서 travel 만큼 — 상단은 슬리브 안에 남는다)
 for tag in JACKS:
     add_loc_driver(jacks[tag], 2, '%.4f - %.4f * x' % (JACK_TOP, JACK_TRAVEL), "jack_deploy")
+# 포구 문: 경첩(로컬 Z) — 우현 문은 −, 좌현 문은 + 가 바깥·앞으로 연다
+add_rot_driver(doors["R"], 2, '-radians(%g) * x' % DOOR_OPEN, "doors")
+add_rot_driver(doors["L"], 2, 'radians(%g) * x' % DOOR_OPEN, "doors")
 
 # 리밋
 c = turntable.constraints.new('LIMIT_ROTATION')
@@ -605,11 +712,12 @@ c.use_limit_x = True
 c.min_x, c.max_x = math.radians(-2), math.radians(52)
 c.owner_space = 'LOCAL'
 
-# ---------------------------------------------------------------- 데모 애니메이션 (전개→선회→고각)
+# ---------------------------------------------------------------- 데모 애니메이션 (전개→선회→고각→문 열림)
 DEMO = {
     "jack_deploy": [(1, 0), (30, 1), (168, 1)],
     "azimuth":     [(1, 0), (38, 0), (70, -32), (104, 24), (126, 0), (168, 0)],
     "elevation":   [(1, 0), (44, 0), (96, 42), (140, 42), (168, 30)],
+    "doors":       [(1, 0), (138, 0), (158, 1), (168, 1)],
 }
 for prop_name, keys in DEMO.items():
     for frame, value in keys:
@@ -670,7 +778,7 @@ bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT_DIR, "launcher.blend"))
 print("[gen] saved launcher.blend")
 
 if os.environ.get("LAUNCHER_SKIP_RENDER") != "1":
-    scene.frame_set(140)                        # 지지대 전개 + 고각 42° 히어로 프레임
+    scene.frame_set(160)                        # 지지대 전개 + 고각 + 문 열림 히어로 프레임
     scene.render.filepath = os.path.join(OUT_DIR, "preview.png")
     try:
         bpy.ops.render.render(write_still=True)
@@ -682,7 +790,7 @@ if os.environ.get("LAUNCHER_SKIP_RENDER") != "1":
 # three.js(GLTFLoader)는 드라이버·커스텀 프로퍼티를 실행하지 않으므로, 가동부 모션을
 # 프레임별로 샘플해 노드 트랜스폼 키프레임으로 굽고 단일 클립으로 내보낸다(SHAHED와 동일).
 def export_threejs_glb(path):
-    movable = [turntable, cradle] + [jacks[t] for t in JACKS]
+    movable = [turntable, cradle] + [jacks[t] for t in JACKS] + list(doors.values())
     frames = range(scene.frame_start, scene.frame_end + 1)
     samples = {ob: [] for ob in movable}
     for f in frames:

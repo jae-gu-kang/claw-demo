@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  CANISTER_LENGTH, LAUNCHER_GEOMETRY, LAUNCHER_SPAN,
-  boresightNed, launcherCaptionNotes, launcherPose,
+  CANISTER_LENGTH, DOOR_OPEN_S, LAUNCHER_GEOMETRY, LAUNCHER_SPAN, PRELUDE_S,
+  advancePrelude, boresightNed, doorOpenFraction, doorRotations, launcherCaptionNotes, launcherPose,
+  startsInCanister,
 } from "./launcher.ts";
 
 const D2R = Math.PI / 180;
@@ -309,5 +310,62 @@ describe("방위 가동 범위", () => {
     const l = { ...LAUNCH, azimuth: 270 * D2R };
     assert.ok(!launcherCaptionNotes(l, launcherPose(l)!).some((s) => s.includes("선회 범위")),
       "270°는 좌현 90°와 같은 자세다");
+  });
+});
+
+describe("포구 문 — 처음부터 재생하면 문이 열린 뒤 발사가 흐른다", () => {
+  /** three `rotation.y = a`를 경첩(원점) 둘레에 실제로 적용한다 — 부호를 손으로 따지지 않으려고. */
+  const turnY = (a: number, [x, z]: [number, number]): [number, number] =>
+    [Math.cos(a) * x + Math.sin(a) * z, -Math.sin(a) * x + Math.cos(a) * z];
+
+  it("다 열면 두 짝이 **바깥·앞으로** 열린다 — 포구는 로컬 −Z", () => {
+    const r = doorRotations(1);
+    near(r.right, -LAUNCHER_GEOMETRY.doorOpenDeg * D2R, "우현");
+    near(r.left, LAUNCHER_GEOMETRY.doorOpenDeg * D2R, "좌현");
+    // 우현(+x) 문의 자유단은 경첩에서 −x 쪽에 있다. 열면 앞(−z)으로, 직각을 넘겨 바깥(+x)으로 비킨다
+    const [rx, rz] = turnY(r.right, [-1, 0]);
+    assert.ok(rz < -0.9 && rx > 0, `우현 문 자유단 ${rx}, ${rz}`);
+    const [lx, lz] = turnY(r.left, [1, 0]);
+    assert.ok(lz < -0.9 && lx < 0, `좌현 문 자유단 ${lx}, ${lz}`);
+  });
+
+  it("닫힘 0 · 범위를 넘는 값은 자른다", () => {
+    near(doorRotations(0).right, 0, "닫힘");
+    near(doorRotations(-1).left, 0, "음수");
+    near(doorRotations(2).left, doorRotations(1).left, "넘침");
+  });
+
+  it("시뮬 시각이 0을 지나면(idx > 0) 늘 열려 있다 — 커서를 끌어 앞으로 가도", () => {
+    assert.equal(doorOpenFraction(1, 0), 1);
+    assert.equal(doorOpenFraction(500, 0), 1);
+  });
+
+  it("idx 0에서는 전주 시각을 따라 0 → 1로 매끄럽게 열린다", () => {
+    assert.equal(doorOpenFraction(0, 0), 0);
+    assert.equal(doorOpenFraction(0, DOOR_OPEN_S), 1);
+    assert.equal(doorOpenFraction(0, PRELUDE_S), 1);
+    let prev = -1;
+    for (let k = 0; k <= 20; k++) {
+      const f = doorOpenFraction(0, (DOOR_OPEN_S * k) / 20);
+      assert.ok(f >= prev, `단조 증가 ${k}`);
+      prev = f;
+    }
+    near(doorOpenFraction(0, DOOR_OPEN_S / 2), 0.5, "가운데", 1e-12);
+    // 다 열린 뒤 잠깐 선다 — 문이 멈추기도 전에 기체가 튀어나오면 문이 기체를 쳐 내는 것처럼 보인다
+    assert.ok(PRELUDE_S > DOOR_OPEN_S);
+  });
+
+  it("전주는 배속을 1배까지만 탄다 — 기본 5×에서도 문이 열리는 것이 보인다", () => {
+    near(advancePrelude(0, 0.1, 5), 0.1, "5×");
+    near(advancePrelude(0, 0.1, 0.5), 0.05, "0.5×는 그대로 느리게");
+    near(advancePrelude(PRELUDE_S - 0.01, 0.1, 1), PRELUDE_S, "끝에서 멈춘다");
+    near(advancePrelude(0.3, -1, 1), 0.3, "벽시계가 뒤로 가도 되감지 않는다");
+  });
+
+  it("기체가 관 안에서 시작할 때만 문을 닫아 둔다 — 레일 표지가 없으면 meta.launch를 믿는다", () => {
+    assert.equal(startsInCanister(true), true);
+    assert.equal(startsInCanister(null), true);
+    assert.equal(startsInCanister(undefined), true);
+    assert.equal(startsInCanister(false), false);
   });
 });

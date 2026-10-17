@@ -160,3 +160,33 @@ describe("SceneHost 배선 — 활주로", () => {
     assert.match(hostFn("setPaths"), /this\.fillLines\(this\.groups\.paths, lines\)/);
   });
 });
+
+describe("SceneController 배선 — 발사관 문과 발사 전주", () => {
+  it("재생 중 idx 0의 전주에선 커서를 세우고 문만 연다 — 끝나는 순간부터 커서 시계를 잰다", () => {
+    const step = fn("step");
+    assert.ok(step, "step이 없다");
+    // 전주 판정이 커서 전진(indexAt)보다 먼저다 — 뒤면 전주 동안 표본이 흘러 기체가 닫힌 문을 뚫는다
+    const at = (s: string) => step.indexOf(s);
+    assert.ok(at("this.inPrelude()") >= 0 && at("this.inPrelude()") < at("indexAt("));
+    assert.match(step, /advancePrelude\(this\.preT, dtWall, this\.speed\)/);
+    // 전주가 끝날 때 시계를 다시 잡지 않으면 indexAt이 전주만큼의 표본을 한 번에 건너뛴다
+    assert.match(step, /this\.preT >= PRELUDE_S\) \{ this\.fromIdx = this\.idx; this\.fromWall = now; \}/);
+    const pre = fn("inPrelude");
+    assert.match(pre, /this\.doorsOn && this\.idx === 0 && this\.preT < PRELUDE_S/);
+  });
+
+  it("커서를 0으로 끌거나 끝에서 다시 재생하면 문이 닫혀 전주를 다시 탄다 — 0을 지난 커서는 열린 문", () => {
+    assert.match(fn("setCursor"), /this\.preT = this\.idx > 0 \|\| !this\.doorsOn \? PRELUDE_S : 0;/);
+    assert.match(fn("setPlaying"), /atEnd\(this\.idx, this\.n\)\) \{ this\.idx = 0; this\.preT = this\.doorsOn \? 0 : PRELUDE_S; \}/);
+  });
+
+  it("그릴 때마다 문 열림을 싣는다 — 관 안에서 시작하지 않는 결과는 늘 열린 문", () => {
+    assert.match(fn("draw"), /applyLauncherDoors\(this\.launcher, this\.doorsOn \? doorOpenFraction\(i, this\.preT\) : 1\)/);
+  });
+
+  it("결과를 읽을 때 문을 닫을지 정하고, 문이 있으면 캡션이 표시용임을 밝힌다", () => {
+    assert.match(src, /startsInCanister\(body\.signals\.on_rail\?\.\[0\]\)/);
+    assert.match(src, /this\.preT = this\.doorsOn \? 0 : PRELUDE_S;/);
+    assert.match(src, /if \(this\.doorsOn\) notes\.push\(LAUNCHER_DOOR_NOTE\);/);
+  });
+});

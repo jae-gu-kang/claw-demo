@@ -304,6 +304,25 @@ for sx, tag in ((1.0, "R"), (-1.0, "L")):
     apply_modifiers(wing)
     bpy.data.objects.remove(cutter)
 
+# 러더 쓸림 홈 — 러더 힌지(RUDDER_HINGE_Y)가 날개 뒷전(−1.45)보다 앞이라, 엘레본 절개 바깥(x 1.12~끝)의 고정
+# 뒷전이 러더가 리밋(±35°) 안에서 쓰는 자리(힌지 둘레 반경 0.131 → x 1.16~1.32)에 남아 러더가 돌면 그것을 뚫었다.
+# 힌지 앞 틈(RUDDER_GAP_Y)부터 뒤를 비운다 — 아웃보드 엘레본 끝(x 1.11)은 홈 안쪽에 남는다. 엘레본 절개와
+# x 1.115에서 겹쳐 잘라(이미 빈 자리) 같은 평면끼리 맞닿는 불리언을 피한다. test_generate_shahed136.py가 쓸림을 잰다.
+RUDDER_HINGE_Y = -1.383
+RUDDER_GAP_Y = -1.378                           # 핀·날개 절개 앞면 — 돌아간 러더 앞모서리(힌지 앞 0.8 mm)와 4 mm 틈
+for sx, tag in ((1.0, "R"), (-1.0, "L")):
+    bm = bmesh.new()
+    x0, x1 = sorted((sx * 1.115, sx * 1.40))
+    loft(bm, [
+        [(x0, -1.60, -0.15), (x0, RUDDER_GAP_Y, -0.15), (x0, RUDDER_GAP_Y, 0.12), (x0, -1.60, 0.12)],
+        [(x1, -1.60, -0.15), (x1, RUDDER_GAP_Y, -0.15), (x1, RUDDER_GAP_Y, 0.12), (x1, -1.60, 0.12)],
+    ])
+    cutter = finish_bm("cut_rudder_notch_" + tag, bm, [], col_model)
+    mod = wing.modifiers.new("cut", 'BOOLEAN')
+    mod.object, mod.operation, mod.solver = cutter, 'DIFFERENCE', 'EXACT'
+    apply_modifiers(wing)
+    bpy.data.objects.remove(cutter)
+
 # ---------------------------------------------------------------- 엘레본 (분리 오브젝트, 인/아웃보드 × 좌/우 = 4면)
 # 규약 §5의 4면 배치: collective δe = 4면 평균(피치), differential δa = (좌−우)/2 (롤)
 elevons = {}
@@ -334,12 +353,12 @@ for sx, tag in ((1.0, "R"), (-1.0, "L")):
               [(x1, y, WING_ZC + z) for y, z in FIN_PENT]])
     fin = finish_bm("Fin_" + tag, bm, [MAT_AIRFRAME], col_model)
 
-    # 러더 자리 절개 — 힌지선 y = -1.383
+    # 러더 자리 절개 — 힌지선(RUDDER_HINGE_Y) 앞 틈부터. 힌지선에 딱 맞춰 자르면 러더가 돌 때 앞모서리가 핀을 0.8 mm 먹는다
     bm = bmesh.new()
     cx0, cx1 = sorted((sx * 1.15, sx * 1.35))
     loft(bm, [
-        [(cx0, -1.60, -0.30), (cx0, -1.383, -0.30), (cx0, -1.383, 0.42), (cx0, -1.60, 0.42)],
-        [(cx1, -1.60, -0.30), (cx1, -1.383, -0.30), (cx1, -1.383, 0.42), (cx1, -1.60, 0.42)],
+        [(cx0, -1.60, -0.30), (cx0, RUDDER_GAP_Y, -0.30), (cx0, RUDDER_GAP_Y, 0.42), (cx0, -1.60, 0.42)],
+        [(cx1, -1.60, -0.30), (cx1, RUDDER_GAP_Y, -0.30), (cx1, RUDDER_GAP_Y, 0.42), (cx1, -1.60, 0.42)],
     ])
     cutter = finish_bm("cut_rudder_" + tag, bm, [], col_model)
     mod = fin.modifiers.new("cut", 'BOOLEAN')
@@ -356,7 +375,7 @@ for sx, tag in ((1.0, "R"), (-1.0, "L")):
                       (-0.002, -0.131, lz), (-0.010, -0.006, lz)])
     loft(bm, rings)
     ob = finish_bm("Rudder_" + tag, bm, [MAT_CTRL], col_model)
-    ob.location = (sx * 1.24, -1.383, WING_ZC + 0.07)
+    ob.location = (sx * 1.24, RUDDER_HINGE_Y, WING_ZC + 0.07)
     rudders[tag] = ob
 
 # ---------------------------------------------------------------- 엔진 (분리 오브젝트, 고정)
@@ -733,6 +752,70 @@ for sx, tag in ((1.0, "R"), (-1.0, "L")):
 for ob in [*elevons.values(), *rudders.values()]:
     shade_smooth(ob)
 
+# ---------------------------------------------------------------- 착륙 스키드 (분리 오브젝트, 고정)
+# 회수 착륙용 헬기식 스키드 두 줄 — 바닥 양쪽. 바닥은 예제 기체 문서의 시뮬 접촉점(engine/claw/profile/examples/
+# delta_demo.json `ground.skid.contacts` = FRD (±0.6, ±0.6, 0.55), CG 기준)에 앉는다 — 모델 원점이 CG이므로 블렌더로
+# x ±0.6 · y ±0.6 · z −0.55. 화면의 스키드 바닥이 그 자리여야 착지·활주에서 기체가 뜨거나 묻히지 않는다(테스트가
+# 문서에서 읽어 대조한다). 가로 관은 접촉점 자리(y ±0.6)에서 스키드에 내려앉고, 동체 바닥에는 안장 받침 + 띠로 물린다.
+# 동체 바닥 높이는 형상에서 잰다(광선) — 동체 단면이 y마다 달라 앞·뒤 관의 높이가 다르다.
+MAT_SKID = make_mat("Skid_Tube", (0.200, 0.208, 0.214), rough=0.48, coat=0.06)     # 도장한 강관
+MAT_SHOE = make_mat("Skid_Shoe", (0.330, 0.330, 0.335), rough=0.55, metal=1.0)     # 닳는 강판(바닥 마모판)
+SKID_X, SKID_Y, SKID_Z = 0.60, (-0.60, 0.60), -0.55     # 접촉점 [블렌더] — 바닥 = 마모판 밑면
+SKID_R, CROSS_R, SHOE_T = 0.016, 0.014, 0.008
+SKID_ZC = SKID_Z + SHOE_T + SKID_R                      # 스키드 관 중심 높이 — 마모판 위에 얹힌다
+SADDLE_X = 0.13                                         # 안장 받침 자리(동체 반폭 0.28 안쪽)
+
+
+def bezier(p0, p1, p2, p3, n):
+    return [tuple(((1 - t) ** 3) * a + 3 * ((1 - t) ** 2) * t * b + 3 * (1 - t) * t * t * c + t ** 3 * d
+                  for a, b, c, d in zip(p0, p1, p2, p3)) for t in (k / n for k in range(n + 1))]
+
+
+def skids_build():
+    belly = kit.Surface(fuselage.data)
+    bm = bmesh.new()
+    SKID, SHOE, FAST, DARK = range(4)
+    for sx in (1.0, -1.0):
+        x = sx * SKID_X
+        # 스키드 관 — 뒤는 곧게 끊고 마개, 앞은 위로 휜다(풀·턱에 걸리지 않게)
+        path = [(x, -0.70, SKID_ZC), (x, 0.0, SKID_ZC), (x, 0.66, SKID_ZC)]
+        path += [(x, 0.66 + 0.10 * math.sin(math.radians(a)), SKID_ZC + 0.10 * (1 - math.cos(math.radians(a))))
+                 for a in range(10, 71, 10)]
+        path.append((x, path[-1][1] + 0.025 * math.cos(math.radians(70)), path[-1][2] + 0.025 * math.sin(math.radians(70))))
+        kit.paint(kit.tube(bm, path, SKID_R, n=12), SKID, smooth=True)
+        kit.paint(kit.lathe(bm, (x, -0.70, SKID_ZC), (0, -1, 0), [(0.0, SKID_R * 0.92), (0.006, SKID_R * 0.92),
+                                                                   (0.010, SKID_R * 0.55)], n=12), DARK, smooth=True)
+        for yc in SKID_Y:
+            # 마모판 — 접촉점 밑. 밑면이 곧 접지면이다
+            kit.paint(kit.rounded_box(bm, (x - 0.012, yc - 0.075, SKID_Z), (x + 0.012, yc + 0.075, SKID_ZC - 0.6 * SKID_R),
+                                      0.003), SHOE)
+            # 가로 관이 내려앉는 소켓(칼라)
+            kit.paint(kit.lathe(bm, (x, yc - 0.035, SKID_ZC), (0, 1, 0),
+                                [(0.0, SKID_R + 0.0035), (0.07, SKID_R + 0.0035)], n=12), FAST, smooth=True)
+    for yc in SKID_Y:
+        # 가로 관 — 동체 바로 밑을 곧게 지나 바깥에서 아래로 휘어 스키드 소켓에 꽂힌다
+        z_mid = belly.hit((0.0, yc, -0.6), (0, 0, 1))[0].z - 0.004 - CROSS_R
+        right = bezier((SADDLE_X + 0.03, yc, z_mid), (SADDLE_X + 0.30, yc, z_mid),
+                       (SKID_X, yc, SKID_ZC + 0.19), (SKID_X, yc, SKID_ZC), 14)
+        left = [(-px, py, pz) for px, py, pz in right]
+        kit.paint(kit.tube(bm, list(reversed(left)) + right, CROSS_R, n=12), SKID, smooth=True)
+        for sx in (1.0, -1.0):
+            xs = sx * SADDLE_X
+            top = belly.hit((xs, yc, -0.6), (0, 0, 1))[0].z + 0.003     # 동체에 3 mm 묻는다(뜬 틈이 안 보이게)
+            kit.paint(kit.rounded_box(bm, (xs - 0.028, yc - 0.024, z_mid), (xs + 0.028, yc + 0.024, top), 0.005), DARK)
+            kit.paint(kit.lathe(bm, (xs - 0.018, yc, z_mid), (1, 0, 0),
+                                [(0.0, CROSS_R + 0.003), (0.036, CROSS_R + 0.003)], n=12), FAST, smooth=True)
+            for dy in (-0.017, 0.017):                  # 받침 고정 볼트 — 앞뒤 면
+                kit.paint(kit.lathe(bm, (xs, yc + math.copysign(0.024, dy), z_mid + 0.022),
+                                    (0, math.copysign(1, dy), 0), [(-0.001, 0.0045), (0.003, 0.0045), (0.004, 0.0035)],
+                                    n=6), FAST)
+    ob = finish_bm("Landing_Skids", bm, [MAT_SKID, MAT_SHOE, MAT_FAST, MAT_DARK], col_model)
+    shade_smooth(ob)
+    return ob
+
+
+skids = skids_build()
+
 # ---------------------------------------------------------------- 루트 엠프티 + 계층
 root = bpy.data.objects.new("SHAHED136_Root", None)
 root.empty_display_type = 'PLAIN_AXES'
@@ -751,6 +834,7 @@ parent_to(fuselage, root)
 parent_to(wing, fuselage)
 parent_to(prop, fuselage)
 parent_to(engine, fuselage)
+parent_to(skids, fuselage)
 for ob in elevons.values():
     parent_to(ob, wing)
 for tag in ("L", "R"):

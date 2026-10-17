@@ -27,7 +27,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 import type { BodyAxes, Vec3 } from "../lib/attitude.ts";
 import { modelColumnsNed } from "../core/modelaxes.ts";
-import type { LauncherPose } from "../core/launcher.ts";
+import { doorRotations, type LauncherPose } from "../core/launcher.ts";
 import { driveNodesFor, surfaceNodeRotations, type SurfacePose } from "../core/surfaces.ts";
 import { applyAerialPerspective } from "./atmosphere.ts";
 import { disposeTree } from "./dispose.ts";
@@ -68,9 +68,10 @@ export function setModelEnvironment(root: Object3D, env: Texture | null, intensi
   return changed;
 }
 
-/** 발사관에서 우리가 모는 노드 — `models/launcher/README.md`가 정본. */
+/** 발사관에서 우리가 모는 노드 — `models/launcher/README.md`가 정본. 문 두 짝(`Door_*`)은 재생 전주가 연다
+ *  (`applyLauncherDoors`). */
 export const LAUNCHER_NODES = [
-  "Turntable", "Cradle", "Jack_FL", "Jack_FR", "Jack_RL", "Jack_RR",
+  "Turntable", "Cradle", "Jack_FL", "Jack_FR", "Jack_RL", "Jack_RR", "Door_L", "Door_R",
 ] as const;
 
 export interface LoadedModel {
@@ -250,6 +251,20 @@ export function applyLauncher(model: LoadedModel, pose: LauncherPose | null): bo
     const rest = (j.userData.restY ?? (j.userData.restY = j.position.y)) as number;
     j.position.y = rest + pose.jackOffsetY;
   }
+  return true;
+}
+
+/** 포구 문 두 짝 — 열림(0 닫힘…1 다 열림)을 경첩 노드의 `rotation.y`에 싣는다. 각·부호는 `doorRotations`가 정본.
+ *
+ * 두 짝이 다 있어야 문이다 — 없으면(문 없던 옛 GLB) **false**를 내고 아무것도 안 돌린다. 호출측은 그때 전주를
+ * 건너뛴다: 문이 없는데 시각 0에서 기다리면 기체가 빈 관 속에서 까닭 없이 선다. */
+export function applyLauncherDoors(model: LoadedModel, open: number): boolean {
+  const l = model.nodes.get("Door_L");
+  const r = model.nodes.get("Door_R");
+  if (!l || !r) return false;
+  const a = doorRotations(open);
+  l.rotation.y = a.left;
+  r.rotation.y = a.right;
   return true;
 }
 
