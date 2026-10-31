@@ -498,40 +498,61 @@ def _launcher_constants():
     body = src[src.index("export const LAUNCHER_GEOMETRY"):src.index("} as const;", src.index("LAUNCHER_GEOMETRY"))]
     geo = {k: float(v) for k, v in re.findall(r"\b(\w+): (-?\d+(?:\.\d+)?),", body)}
     aft = float(re.search(r"const VEHICLE_AFT_EXTENT = (\d+(?:\.\d+)?);", src).group(1))
-    return geo, aft
+    clear = float(re.search(r"const TAIL_CLEARANCE = (\d+(?:\.\d+)?);", src).group(1))
+    return geo, aft, clear
 
 
-def _liner_half_height():
-    """관 라이너(`Box_Tubes`) 바닥이 관축 아래 몇 m인가 — 발사관 GLB에서 잰다(크래들 로컬 × 루트 스케일)."""
+def _liner():
+    """관 라이너(`Box_Tubes`, 관 속 벽) 범위 [m] — 크래들 로컬(관축 기준, 피벗 원점) × 루트 스케일. (최소, 최대) xyz."""
     lg = Glb(LAUNCHER_GLB)
-    mins = [lg.json["accessors"][p["attributes"]["POSITION"]]["min"][1]
-            for p in lg.json["meshes"][lg.nodes[lg.index["Box_Tubes"]]["mesh"]]["primitives"]]
     scale = lg.nodes[lg.index["LAUNCHER_Root"]]["scale"][1]
-    return -min(mins) * scale
+    return [v * scale for v in lg.mesh_min("Box_Tubes")], [v * scale for v in lg.mesh_max("Box_Tubes")]
+
+
+def _propeller_disc(g):
+    """도는 프로펠러가 쓸고 지나가는 자리 — 정점마다 허브축(glTF z) 둘레 반경으로 위·아래·좌·우 끝점. 구운 회전은 z축
+    둘레뿐이라(쿼터니언 x·y = 0) 반경과 z는 그대로다."""
+    n = g.nodes[g.index["Propeller"]]
+    q = n.get("rotation", [0, 0, 0, 1])
+    assert abs(q[0]) < 1e-6 and abs(q[1]) < 1e-6, q
+    hub = [a + b for a, b in zip(g.offset(g.parent_of("Propeller")), n.get("translation", [0, 0, 0]))]
+    out = []
+    for x, y, z in g.positions("Propeller"):
+        r = math.hypot(x, y)
+        out += [(hub[0], hub[1] - r, hub[2] + z), (hub[0], hub[1] + r, hub[2] + z),
+                (hub[0] - r, hub[1], hub[2] + z), (hub[0] + r, hub[1], hub[2] + z)]
+    return out
 
 
 @pytest.mark.parametrize("name", ["shahed136.glb", "shahed136_eoir.glb"])
 def test_stowed_vehicle_fits_the_canister_at_the_example_launches(name):
-    """예제 문서의 레일(고각·원점 높이)에서 관 속 기체가 라이너 바닥 위에 있다 — 스키드는 접힌 자세로.
+    """예제 문서의 레일(고각·원점 높이)에서 관 속 기체가 라이너 안에 있다 — 스키드는 접힌 자세로, 프로펠러는 도는 원반으로.
 
-    가상환경은 기체 꼬리가 관 안에 남게 관축 위의 기준점을 레일 원점과 **수평만** 맞춘다(core/launcher.ts). 그래서 고각
-    θ에서 CG는 관축보다 (피벗 높이 + d·sinθ − 원점 높이)·cosθ 아래에 있다(d = 피벗→기준점, 15°에서 0.41 m). 펼친
-    스키드(CG 아래 0.55)는 바닥을 뚫었다(v2.01 리뷰) — 그래서 관 안·비행 중에는 접는다.
-
-    프로펠러는 뺀다: 도는 원반(반경 0.45)이 바닥보다 7 cm 낮게 지나는 것은 스키드 이전부터다 — 관 벽 속이라 안 보이고
-    포구 아랫입술을 0.6 s의 발사 중 2 cm 스친다."""
+    가상환경은 기체 원점의 **관축 방향** 위치가 관 뒤끝에서 꼬리 길이 + 틈이 되게 발사관을 수평으로 민다
+    (core/launcher.ts `launcherPose` — 그 공식은 launcher.test.ts가 회전행렬로 따로 확인한다). 트레일러는 지면에 서고
+    기체는 시뮬 원점에 있으므로, 고각 θ에서 기체 원점은 관축보다 아래에 있다(15°에서 0.45 m). 펼친 스키드(원점 아래 0.55)는
+    라이너 바닥을 뚫었고(v2.01 리뷰) 그래서 관 안·비행 중에는 접는다. 도는 원반(반경 0.45)은 대칭 개구일 때 바닥보다
+    7 cm 낮아 포구 아랫입술을 스쳤고, 수평만 맞추던 배치에서는 뒤끝이 관 뒤 벽을 11 cm 팠다 — v2.04에서 배치를 관축
+    방향으로 재고 관 바닥을 낮췄다(generate_launcher.py `TUBE_ZLO`)."""
     g = load(name)
     stow = _stow(g)
-    geo, aft = _launcher_constants()
+    geo, aft, clear = _launcher_constants()
     s = geo["rootScale"]
     pivot_h = (geo["turntableY"] + geo["cradleY"]) * s
-    d = aft - geo["tubeAftZ"] * s
-    liner = _liner_half_height()
+    back = geo["tubeAftZ"] * s                                        # 피벗 → 관 뒤끝(라이너 뒷면)
+    lo, hi = _liner()
+    assert hi[2] == pytest.approx(back, abs=1e-3)
     pts = [p for n in _mesh_nodes(g) if n != "Propeller" for p in _world_points(g, n, stow.get(n))]
-    lowest = -min(p[1] for p in pts)                              # CG 아래 깊이(동체축) [m]
+    pts += _propeller_disc(g)
     for doc in _shahed_docs():
         rail = doc["ground"]["rail"]
-        th = rail["elev_angle"]
-        below_axis = (pivot_h + d * math.sin(th) - rail["origin_height"]) * math.cos(th)
-        room = liner - below_axis
-        assert lowest <= room - 0.01, "%s: CG 아래 %.3f m까지 내려가는데 라이너 바닥은 %.3f m" % (doc["id"], lowest, room)
+        th, h0 = rail["elev_angle"], rail["origin_height"]
+        u = aft + clear - back                                         # 피벗 → 기체 원점, 관축 방향
+        ahead = (u - (h0 - pivot_h) * math.sin(th)) / math.cos(th)    # 그 수평 거리(launcherPose)
+        below = ahead * math.sin(th) - (h0 - pivot_h) * math.cos(th)  # 기체 원점이 관축 아래인 거리
+        tail = min(u + back - p[2] for p in pts)                       # 관 뒤 벽까지(관축 방향)
+        floor = min(-lo[1] - (below - p[1]) for p in pts)              # 라이너 바닥까지
+        ceiling = min(hi[1] - (p[1] - below) for p in pts)             # 천장까지
+        side = min(hi[0] - abs(p[0]) for p in pts)
+        msg = "%s: 꼬리 %.3f · 바닥 %.3f · 천장 %.3f · 옆 %.3f m" % (doc["id"], tail, floor, ceiling, side)
+        assert min(tail, floor, ceiling, side) >= 0.02, msg

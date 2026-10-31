@@ -425,7 +425,12 @@ BX, BZ = 1.44, 0.52          # 박스 반폭·반높이 — 폭은 2배, 높이�
 BY0, BY1 = -2.10, 1.70       # 박스 뒤·앞(포구) — 길이 2배 (지면 기준 7.6 m)
 # 단일 대형 캐니스터 개구. 지면 기준 개구 5.3×1.8 m·내부 길이 7.2 m — 기체(스팬 2.5 m·
 # 전장 3.65 m)가 통째로 들어가고도 남는다. 관 뒤끝은 0.15 두께 벽으로 막힌 폐쇄 브리치.
-TUBE_HX, TUBE_HZ = 1.32, 0.42   # 개구 반폭·반높이 (확대 전 로컬)
+TUBE_HX, TUBE_HZ = 1.32, 0.42   # 개구 반폭·관축 위 높이 (확대 전 로컬)
+# 개구 바닥은 관축 아래로 더 깊다(v2.04). 트레일러는 지면에 서고 기체는 시뮬 원점(2.9 m = 피벗 높이)에 있으므로,
+# 꼬리를 관 뒤 벽 안에 담으면 15°에서 기체 원점이 관축보다 0.45 m 낮다(web/world/src/core/launcher.ts). 그때 도는
+# 프로펠러 원반(반경 0.45) 바닥은 관축 아래 0.90 m인데, 대칭 개구(0.84 m)였을 때는 그 바닥이 라이너와 포구 아랫입술을
+# 스쳤다. 바깥 상자는 못 내린다 — 바닥이 펜더 위 1 cm라(test_cradle_underside_clears_the_fenders) 바닥 벽을 얇게 판다
+TUBE_ZLO = 0.48                 # 개구 바닥의 관축 아래 깊이 (로컬, 바닥 벽 0.04 — 외피 모서리 반경 0.035보다 두껍다)
 # 포구 문 — 좌우 두 짝, 바깥 앞모서리의 수직 경첩으로 바깥·앞으로 연다(위로 여는 한 짝은 포구 앞으로 뻗은 상부 레일에
 # 걸린다). 경첩축은 상자 바깥 모서리(BX) 밖·문 두께 가운데 — 문이 포구 면 뒤로 돌아 들어가지 않는다.
 # DOOR_OPEN은 가상환경 LAUNCHER_GEOMETRY.doorOpenDeg와 같아야 한다(test_generate_launcher.py가 대조한다).
@@ -443,7 +448,7 @@ cradle = finish("Cradle", bm, [MAT_OLIVE, MAT_METAL, MAT_MARK, MAT_DARK], col_mo
 # 장갑판·트러니언 스텁(겹친 껍질)까지 얹은 채 EXACT로 자르면 절개 상자의 앞면(포구 앞 2.05)이 남아 포구를 막았다
 # (test_nothing_on_the_cradle_caps_the_bore_or_its_exit). 그 둘은 개구에 안 닿으므로 자른 뒤에 덧붙인다
 bm = bmesh.new()
-add_box(bm, (-TUBE_HX, -1.95, TRUN - TUBE_HZ), (TUBE_HX, 2.05, TRUN + TUBE_HZ))
+add_box(bm, (-TUBE_HX, -1.95, TRUN - TUBE_ZLO), (TUBE_HX, 2.05, TRUN + TUBE_HZ))
 cutter = finish("cut_tube", bm, MAT_OLIVE, col_model)
 boolean_diff(cradle, cutter)
 bm = bmesh.new()
@@ -464,7 +469,7 @@ shade_smooth(cradle)
 
 
 def cradle_details(bm, surf, slot, L):
-    """개구(|x| < 1.32, |z − TRUN| < 0.42) 안으로는 아무것도 넣지 않는다 — 기체가 그 안에 선다."""
+    """개구(|x| < 1.32, −0.48 < z − TRUN < 0.42) 안으로는 아무것도 넣지 않는다 — 기체가 그 안에 선다."""
     olive, metal, mark, dark = slot(MAT_OLIVE), slot(MAT_METAL), slot(MAT_MARK), slot(MAT_DARK)
 
     def box(p0, p1, r, mat):
@@ -478,16 +483,16 @@ def cradle_details(bm, surf, slot, L):
     for y in (-1.35, -0.25, 0.85):
         box((-BX + 0.04, y - 0.03, TRUN + BZ - 0.01), (BX - 0.04, y + 0.03, TRUN + BZ + 0.022), 0.008, olive)
         box((-BX + 0.04, y - 0.03, TRUN - BZ - 0.008), (BX - 0.04, y + 0.03, TRUN - BZ + 0.01), 0.004, olive)
-    # 포구 테 — 개구 둘레로 3.5 cm 솟은 틀 + 볼트. 문 경첩(몸통 쪽)은 좌우 앞모서리에
+    # 포구 테 — 개구 둘레로 3.5 cm 솟은 틀 + 볼트. 문 경첩(몸통 쪽)은 좌우 앞모서리에. 아래 띠는 깊어진 개구 밑(바닥 벽
+    # 0.04)에 남은 좁은 띠라 볼트를 안 박는다 — 닫힌 문 뒷면 패킹과 같은 높이대가 된다
     rim = [((-BX + 0.03, TRUN + TUBE_HZ + 0.005), (BX - 0.03, TRUN + BZ - 0.03)),
-           ((-BX + 0.03, TRUN - BZ + 0.03), (BX - 0.03, TRUN - TUBE_HZ - 0.005)),
-           ((TUBE_HX + 0.005, TRUN - TUBE_HZ - 0.005), (BX - 0.03, TRUN + TUBE_HZ + 0.005)),
-           ((-BX + 0.03, TRUN - TUBE_HZ - 0.005), (-TUBE_HX - 0.005, TRUN + TUBE_HZ + 0.005))]
+           ((-BX + 0.03, TRUN - BZ + 0.008), (BX - 0.03, TRUN - TUBE_ZLO - 0.005)),
+           ((TUBE_HX + 0.005, TRUN - TUBE_ZLO - 0.005), (BX - 0.03, TRUN + TUBE_HZ + 0.005)),
+           ((-BX + 0.03, TRUN - TUBE_ZLO - 0.005), (-TUBE_HX - 0.005, TRUN + TUBE_HZ + 0.005))]
     for (x0, z0), (x1, z1) in rim:
         box((x0, BY1 - 0.01, z0), (x1, BY1 + 0.035, z1), 0.006, olive)
     for x in kit.spaced((-1.30, 0, 0), (1.30, 0, 0), 0.26):
-        for z in (TRUN + 0.47, TRUN - 0.47):
-            bolt_at((x[0], BY1 + 0.035, z), (0, 1, 0))
+        bolt_at((x[0], BY1 + 0.035, TRUN + 0.47), (0, 1, 0))
     # 문 경첩 몸통 쪽 — 옆면에서 경첩축까지 뻗은 받침 + 가운데 마디(문 쪽 마디가 위아래로 문다). 받침은 문 뒷면(BY1+0.05)
     # 뒤·문 안쪽 모서리(HX−0.033) 바깥이라, 문이 어느 각에 있어도 닿지 않는다(문 모서리는 축에서 0.039 밖을 돈다)
     for sx in (1.0, -1.0):
@@ -544,7 +549,7 @@ decorate(cradle, cradle_details)
 # 포구를 판자처럼 막아 문이 열려도 관 속이 안 보였다(하늘 환경광을 받아 올리브 판으로 읽혔다). bbox(포구·관 뒤끝)는 그대로다
 bm = bmesh.new()
 lx0, lx1, ly0, ly1 = -TUBE_HX + 0.025, TUBE_HX - 0.025, -1.93, 1.68
-lz0, lz1 = TRUN - TUBE_HZ + 0.025, TRUN + TUBE_HZ - 0.025
+lz0, lz1 = TRUN - TUBE_ZLO + 0.01, TRUN + TUBE_HZ - 0.025   # 바닥은 1 cm만 띄운다 — 프로펠러 원반 자리(TUBE_ZLO)
 v = {(i, j, k): bm.verts.new((x, y, z)) for i, x in enumerate((lx0, lx1)) for j, y in enumerate((ly0, ly1))
      for k, z in enumerate((lz0, lz1))}
 for quad in (((0, 0, 0), (1, 0, 0), (1, 0, 1), (0, 0, 1)),          # 뒤(브리치)
@@ -604,10 +609,11 @@ for sx, tag in ((1.0, "R"), (-1.0, "L")):
             (p0, p1) = xs(HX - 0.32, HX)
             kit.paint(kit.rounded_box(bm, (p0, DOOR_FRONT - 0.002, z0), (p1, lip + 0.006, z1), 0.004), D_MT)
             kit.paint(hexbolt(bm, (sx * (HX - 0.22), lip + 0.006, 0.5 * (z0 + z1)), (0, 1, 0), r=0.009, h=0.007), D_MT)
-    # 뒷면 고무 패킹 — 개구 둘레(포구 테 볼트 줄 TRUN±0.47 안쪽). 포구 테 앞면(BY1+0.035)과 0.7 cm 띄운다
+    # 뒷면 고무 패킹 — 개구 둘레(위는 포구 테 볼트 줄 TRUN+0.47 안쪽, 아래는 문 아랫변 DOOR_Z0 안쪽). 포구 테
+    # 앞면(BY1+0.035)과 0.7 cm 띄운다
     for (a, b, z0, z1) in ((0.0, TUBE_HX + 0.03, TRUN + TUBE_HZ, TRUN + TUBE_HZ + 0.03),
-                           (0.0, TUBE_HX + 0.03, TRUN - TUBE_HZ - 0.03, TRUN - TUBE_HZ),
-                           (TUBE_HX, TUBE_HX + 0.03, TRUN - TUBE_HZ - 0.03, TRUN + TUBE_HZ + 0.03)):
+                           (0.0, TUBE_HX + 0.03, DOOR_Z0 + 0.004, TRUN - TUBE_ZLO),
+                           (TUBE_HX, TUBE_HX + 0.03, DOOR_Z0 + 0.004, TRUN + TUBE_HZ + 0.03)):
         (p0, p1) = xs(max(a, xi), b)
         kit.paint(kit.rounded_box(bm, (p0, BY1 + 0.042, z0), (p1, DOOR_Y0 + 0.002, z1), 0.004), D_DK)
     if sx > 0:                                                    # 맞댐띠 — 우현 문에만, 좌현 문 테 위로 겹친다

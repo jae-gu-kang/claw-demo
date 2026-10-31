@@ -151,11 +151,11 @@ def test_bore_liner_is_open_at_the_muzzle_and_faces_inward(glb):
 
 
 def test_nothing_on_the_cradle_intrudes_into_the_bore(glb):
-    """크래들(외피·디테일)의 어떤 정점도 관 개구(반폭 1.32·반높이 0.42, 크래들 로컬 z −3.50…0.15) 안에 없다 —
-    기체가 그 안에 선다. 개구 벽 위의 정점(경계)은 허용한다."""
+    """크래들(외피·디테일)의 어떤 정점도 관 개구(반폭 1.32·관축 위 0.42·아래 0.48, 크래들 로컬 z −3.50…0.15) 안에
+    없다 — 기체가 그 안에 선다. 개구 벽 위의 정점(경계)은 허용한다."""
     eps = 1e-3
     inside = [p for p in glb.positions("Cradle")
-              if abs(p[0]) < 1.32 - eps and abs(p[1]) < 0.42 - eps and -3.50 + eps < p[2] < 0.15 - eps]
+              if abs(p[0]) < TUBE_HX - eps and -TUBE_YLO + eps < p[1] < TUBE_HY - eps and -3.50 + eps < p[2] < 0.15 - eps]
     assert not inside, inside[:5]
 
 
@@ -167,7 +167,7 @@ def test_nothing_on_the_cradle_caps_the_bore_or_its_exit(glb):
     caps = []
     for a, b, c in glb.triangles("Cradle"):
         m = [(a[k] + b[k] + c[k]) / 3 for k in range(3)]
-        if abs(m[0]) < TUBE_HX - eps and abs(m[1]) < TUBE_HY - eps and m[2] < 0.15 - eps:
+        if abs(m[0]) < TUBE_HX - eps and -TUBE_YLO + eps < m[1] < TUBE_HY - eps and m[2] < 0.15 - eps:
             caps.append(m)
     assert not caps, caps[:3]
 
@@ -179,13 +179,15 @@ def test_cradle_underside_clears_the_fenders(glb):
 
 
 # ---------------------------------------------------------------- 포구 문
-# 크래들 로컬(glTF): 포구 면 z = −3.50, 포구 테 앞면 −3.535(+ 볼트 머리). 관 개구 반폭 1.32·반높이 0.42.
+# 크래들 로컬(glTF): 포구 면 z = −3.50, 포구 테 앞면 −3.535(+ 볼트 머리). 관 개구 반폭 1.32·관축 위 0.42·아래 0.48.
 MUZZLE_FACE = -3.50
 # 문은 어떤 각에서도 이보다 앞(더 음수)에 있다 — 포구 테 앞면(−3.535)보다 5 mm 앞. 포구 테 볼트 머리(−3.547까지)는 닫힌 문의
 # 뒷면 패킹(−3.542)과 같은 깊이대지만 옆으로 6 mm 떨어져 있다 — 그 옆 거리와 몸통 경첩 받침과의 여유는 이 시험이 재지 않는다
 # (v2.01 리뷰가 방위 ±100°·고각 0/15°에서 따로 확인했다).
 FACE_CLEAR = -3.54
 TUBE_HX, TUBE_HY = 1.32, 0.42
+with open(os.path.join(HERE, "generate_launcher.py"), encoding="utf-8") as _f:
+    TUBE_YLO = float(re.search(r"^TUBE_ZLO = (\d+(?:\.\d+)?)", _f.read(), re.M).group(1))   # 개구 바닥 깊이(v2.04)
 
 
 def _door_points(glb, name, deg):
@@ -231,10 +233,10 @@ def test_doors_hang_on_the_cradle_and_close_the_muzzle(glb):
             if not ((d1 < -1e-12 or d2 < -1e-12 or d3 < -1e-12) and (d1 > 1e-12 or d2 > 1e-12 or d3 > 1e-12)):
                 return True
         return False
-    # 5 cm 격자 + 개구 가장자리(±1.319·±0.419)와 가운데 맞닿는 자리(맞댐띠가 덮는다) — 격자만이면 가장자리 2 cm·가운데
-    # 10 cm 틈을 놓친다(v2.02 리뷰)
+    # 5 cm 격자 + 개구 가장자리(±1.319·위 0.419·아래 −0.479)와 가운데 맞닿는 자리(맞댐띠가 덮는다) — 격자만이면
+    # 가장자리 2 cm·가운데 10 cm 틈을 놓친다(v2.02 리뷰)
     xs = sorted({x / 100 for x in range(-130, 131, 5)} | {-1.319, 1.319, -0.008, -0.004, 0.0, 0.004, 0.008})
-    ys = sorted({y / 100 for y in range(-40, 41, 5)} | {-0.419, 0.419})
+    ys = sorted({y / 100 for y in range(-45, 41, 5)} | {-(TUBE_YLO - 0.001), TUBE_HY - 0.001})
     holes = [(x, y) for x in xs for y in ys if not covered(x, y)]
     assert not holes, holes[:5]
 
@@ -248,10 +250,11 @@ def test_doors_swing_clear_of_the_canister_face(glb):
 
 
 def test_open_doors_clear_the_exit_corridor(glb):
-    """다 열리면 관 개구를 앞으로 늘인 통로(|x| < 1.32, |y| < 0.42, 포구 앞) 안에 문 정점이 없다 — 기체가 지나간다."""
+    """다 열리면 관 개구를 앞으로 늘인 통로(|x| < 1.32, −0.48 < y < 0.42, 포구 앞) 안에 문 정점이 없다 — 기체가
+    지나간다."""
     for name in ("Door_L", "Door_R"):
         inside = [p for p in _door_points(glb, name, _door_angle(name))
-                  if abs(p[0]) < TUBE_HX and abs(p[1]) < TUBE_HY and p[2] < MUZZLE_FACE]
+                  if abs(p[0]) < TUBE_HX and -TUBE_YLO < p[1] < TUBE_HY and p[2] < MUZZLE_FACE]
         assert not inside, (name, inside[:3])
 
 

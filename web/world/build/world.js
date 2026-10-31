@@ -39686,6 +39686,7 @@ const LAUNCHER_GEOMETRY = {
   doorOpenDeg: 115
 };
 const VEHICLE_AFT_EXTENT = 1.9;
+const TAIL_CLEARANCE = 0.03;
 const LAUNCHER_SPAN = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ) * LAUNCHER_GEOMETRY.rootScale;
 const CANISTER_LENGTH = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.muzzleZ) * LAUNCHER_GEOMETRY.rootScale;
 function boresightNed(azimuth, elevation) {
@@ -39701,8 +39702,10 @@ function launcherPose(launch) {
   const pivotHeight = g.turntableY + g.cradleY;
   const muzzleHeight = (pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped)) * g.rootScale;
   const breechHeight = (pivotHeight - g.tubeAftZ * Math.sin(clamped)) * g.rootScale;
-  const anchorZ = g.tubeAftZ - VEHICLE_AFT_EXTENT / g.rootScale;
-  const yawR = (g.cradleAftZ + anchorZ * Math.cos(clamped)) * g.rootScale;
+  const h0 = finite(launch?.origin_height) ?? pivotHeight * g.rootScale;
+  const u2 = VEHICLE_AFT_EXTENT + TAIL_CLEARANCE - g.tubeAftZ * g.rootScale;
+  const ahead = (u2 - (h0 - pivotHeight * g.rootScale) * Math.sin(clamped)) / Math.cos(clamped);
+  const yawR = g.cradleAftZ * g.rootScale - ahead;
   const rootOffsetNed = [
     g.turntableAftZ * g.rootScale + yawR * Math.cos(az),
     yawR * Math.sin(az),
@@ -39724,7 +39727,7 @@ const deg$1 = (rad) => (rad * 180 / Math.PI).toFixed(0);
 function launcherCaptionNotes(launch, pose2) {
   if (pose2 == null || launch == null) return [];
   const notes = [];
-  notes.push("발사관 위치는 시뮬에 없습니다 — 관축 시작점이 발사 원점 위에 오도록 놓은 표시용 배치입니다.");
+  notes.push("발사관 위치는 시뮬에 없습니다 — 기체가 관 안(꼬리가 관 뒤 벽 안쪽)에 들도록 놓은 표시용 배치입니다.");
   const originHeight = finite(launch.origin_height);
   if (originHeight !== null) {
     const dz = pose2.breechHeight - originHeight;
@@ -47826,7 +47829,9 @@ class SceneController {
       const d = w2.length > 2 && num(w2[2]) !== null ? -num(w2[2]) : -rwElev;
       marks.push({ ne: [n0, e0, d], kind: "waypoint", radius: acceptRadius });
     }
-    for (let i = 0; i < this.n; i++) {
+    const lp = launcherPose(body.meta?.launch);
+    const startInCanister = this.launcher != null && lp != null && startsInCanister(body.signals.on_rail?.[0]);
+    for (let i = 0; i < this.n && !startInCanister; i++) {
       const s0 = sampleAt(body.signals, i);
       if (s0) {
         marks.push({ ne: s0, kind: "start", radius: 0 });
@@ -47835,7 +47840,6 @@ class SceneController {
     }
     this.replayMarks = marks;
     this.syncMarkers();
-    const lp = launcherPose(body.meta?.launch);
     if (this.launcher) {
       const site = [0, 0, -(num(body.meta?.runway?.elevation) ?? 0)];
       showLauncher(this.launcher, site, lp);

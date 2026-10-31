@@ -159,11 +159,13 @@ describe("포구 높이와 캡션", () => {
   });
 });
 
-describe("루트 배치 오프셋 — 관 뒤끝보다 기체 꼬리 길이만큼 안쪽인 지점이 레일 원점 위에 온다", () => {
+describe("루트 배치 오프셋 — 기체 원점의 관축 방향 위치가 관 뒤끝에서 꼬리 길이 + 틈이 되게 수평으로 민다", () => {
   const S = LAUNCHER_GEOMETRY.rootScale;
   const VEHICLE_AFT_EXTENT = 1.90; // shahed136.glb 실측 — 아래 "기체 꼬리" describe와 공유
-  const anchorZ = 0.13 - VEHICLE_AFT_EXTENT / S;
-  const yawR = (0.90 + anchorZ * Math.cos(15 * D2R)) * S; // 방위와 함께 도는 수평 성분
+  const TAIL_CLEARANCE = 0.03;
+  // 원점 2.9 m = 피벗 높이라 수직 몫이 없다: 관축 방향 u = D·cosθ → D = u / cosθ
+  const ahead = (VEHICLE_AFT_EXTENT + TAIL_CLEARANCE - 0.13 * S) / Math.cos(15 * D2R);
+  const yawR = 0.90 * S - ahead; // 방위와 함께 도는 수평 성분
 
   it("ψ = 0: 북으로", () => {
     const off = launcherPose(LAUNCH)!.rootOffsetNed;
@@ -181,16 +183,17 @@ describe("루트 배치 오프셋 — 관 뒤끝보다 기체 꼬리 길이만�
   });
 });
 
-describe("기체 꼬리 — 관 뒤끝에 그대로 맞추면 관 밖으로 나오던 회귀(2026-09-02)", () => {
-  // shahed136.glb bbox z ∈ [−1.75, 1.90](Y-up) — 기체 원점(≈무게중심) 뒤로 꼬리·
+describe("기체 꼬리 — 관 안에, 관축 방향으로 잰다(2026-09-02 · v2.04)", () => {
+  // shahed136.glb bbox z ∈ [−1.75, 1.905](Y-up) — 기체 원점(≈무게중심) 뒤로 꼬리·
   // 프로펠러가 1.90 m 뻗어 있다. 기체는 rootScale 없이 1:1로 놓인다(MODEL_SCALE).
   const VEHICLE_AFT_EXTENT = 1.90;
+  const TAIL_CLEARANCE = 0.03;
   const S = LAUNCHER_GEOMETRY.rootScale;
   const g = LAUNCHER_GEOMETRY;
 
   /** 루트 원점 → 크래들 로컬 Z가 zLocal인 점까지의 NED 오프셋(로컬 단위, rootScale 전).
    *
-   *  `launcherPose`의 yawR·breechHeight 공식을 재사용하지 않고 회전행렬을 그대로
+   *  `launcherPose`의 공식을 재사용하지 않고 회전행렬을 그대로
    *  곱해 독립적으로 구한다 — `nodeBoresightToNed`와 같은 이유(유도를 믿지 않는다). */
   function nodePointToNed(turntableY: number, cradleX: number, zLocal: number): [number, number, number] {
     let [x, y, z] = [0, 0, zLocal];
@@ -203,47 +206,58 @@ describe("기체 꼬리 — 관 뒤끝에 그대로 맞추면 관 밖으로 나�
     return [-z, x, -y]; // nedToRender(n,e,d) = [e, −d, −n] 의 역
   }
 
-  /** 루트가 `siteNed`에 `rootOffsetNed` 만큼 밀려 놓였을 때, 크래들 로컬 Z가 zLocal인
-   *  점의 절대 NED 위치(지면 기준, m) — `placeLauncher`가 하는 일 그대로. */
+  /** 루트가 지면 위 발사 지점(NED 원점)에서 `rootOffsetNed` 만큼 밀려 놓였을 때, 크래들 로컬 Z가 zLocal인
+   *  점의 절대 NED 위치(m) — `placeLauncher`가 하는 일 그대로. */
   function absoluteNed(pose: NonNullable<ReturnType<typeof launcherPose>>, zLocal: number): [number, number, number] {
     const local = nodePointToNed(pose.turntableY, pose.cradleX, zLocal);
     const off = pose.rootOffsetNed;
     return [off[0] + local[0] * S, off[1] + local[1] * S, off[2] + local[2] * S];
   }
 
-  it("물리 관 뒤끝(tubeAftZ)이 레일 원점(=기체 원점)보다 정확히 1.90 m 뒤(−보어사이트)에 온다", () => {
-    const pose = launcherPose(LAUNCH)!;
-    const breech = absoluteNed(pose, g.tubeAftZ);
-    const u = boresightNed(LAUNCH.azimuth, pose.cradleX);
-    near(breech[0], -VEHICLE_AFT_EXTENT * u[0], "북", 1e-9);
-    near(breech[1], -VEHICLE_AFT_EXTENT * u[1], "동", 1e-9);
-  });
-
-  it("기체 꼬리(원점 뒤 1.90 m)가 이 물리 관 뒤끝과 수평으로 정확히 겹친다 — 관 밖으로 안 나온다", () => {
-    const pose = launcherPose(LAUNCH)!;
-    const breech = absoluteNed(pose, g.tubeAftZ);
-    const u = boresightNed(LAUNCH.azimuth, pose.cradleX);
-    const tail: [number, number] = [-VEHICLE_AFT_EXTENT * u[0], -VEHICLE_AFT_EXTENT * u[1]];
-    near(breech[0], tail[0], "북", 1e-9);
-    near(breech[1], tail[1], "동", 1e-9);
-  });
-
-  it("기체 코(원점 앞 1.75 m)는 포구(muzzleZ)에서 한참 안쪽 — 앞으로도 안 나온다", () => {
-    const pose = launcherPose(LAUNCH)!;
-    const muzzle = absoluteNed(pose, g.muzzleZ);
-    const u = boresightNed(LAUNCH.azimuth, pose.cradleX);
-    const nose: [number, number] = [1.75 * u[0], 1.75 * u[1]];
-    const marginNorth = muzzle[0] - nose[0];
-    assert.ok(marginNorth > 3, `포구까지 여유가 3 m도 안 된다: ${marginNorth}`);
-  });
-
-  it("ψ = 90°에서도 성립한다 — 회전축에 의존하지 않는 관계다", () => {
-    const l = { ...LAUNCH, azimuth: 90 * D2R };
+  /** 기체 원점(레일 원점, 지면 위 origin_height)을 관 뒤끝 기준 관축 좌표로 — [관축 방향, 관축 아래]. */
+  function inBore(l: typeof LAUNCH): [number, number] {
     const pose = launcherPose(l)!;
     const breech = absoluteNed(pose, g.tubeAftZ);
     const u = boresightNed(l.azimuth, pose.cradleX);
-    near(breech[0], -VEHICLE_AFT_EXTENT * u[0], "북", 1e-9);
-    near(breech[1], -VEHICLE_AFT_EXTENT * u[1], "동", 1e-9);
+    const [rn, re, rd] = [0 - breech[0], 0 - breech[1], -l.origin_height - breech[2]];
+    const along = rn * u[0] + re * u[1] + rd * u[2];
+    const [sn, se, sd] = [rn - along * u[0], re - along * u[1], rd - along * u[2]];
+    const below = Math.sign(sd) * Math.hypot(sn, se, sd); // NED d가 + = 아래
+    return [along, below];
+  }
+
+  it("꼬리(원점 뒤 1.90 m)가 관 뒤끝보다 관축 방향으로 정확히 틈만큼 안쪽이다", () => {
+    const [along] = inBore(LAUNCH);
+    near(along - VEHICLE_AFT_EXTENT, TAIL_CLEARANCE, "꼬리 → 관 뒤끝", 1e-9);
+  });
+
+  it("회귀: 원점 높이가 피벗과 달라도 관축 방향으로 맞는다 — 수평만 맞추면 15°에서 0.11 m 뒤로 처졌다", () => {
+    for (const h of [1.2, 2.9, 3.4]) {
+      const [along] = inBore({ ...LAUNCH, origin_height: h });
+      near(along - VEHICLE_AFT_EXTENT, TAIL_CLEARANCE, `원점 ${h} m`, 1e-9);
+    }
+  });
+
+  it("15°·원점 2.9 m에서 기체는 관축 0.45 m 아래다 — 관 바닥은 이 자리에 맞춰 낮췄다(generate_launcher.py TUBE_ZLO)", () => {
+    // 트레일러는 지면에 서고 기체는 시뮬 자리에 있으므로, 피벗 뒤에 담긴 꼬리 길이만큼 관축이 원점보다 높다.
+    const [, below] = inBore(LAUNCH);
+    near(below, (VEHICLE_AFT_EXTENT + TAIL_CLEARANCE - g.tubeAftZ * S) * Math.tan(15 * D2R), "관축 아래", 1e-9);
+    assert.ok(below > 0.44 && below < 0.46, String(below));
+    // 고각 0°면 관축 위에 있다
+    near(inBore({ ...LAUNCH, elev_angle: 0 })[1], 0, "0°", 1e-9);
+  });
+
+  it("기체 코(원점 앞 1.75 m)는 포구(muzzleZ)에서 한참 안쪽 — 앞으로도 안 나온다", () => {
+    const [along] = inBore(LAUNCH);
+    const muzzle = (g.tubeAftZ - g.muzzleZ) * S;
+    assert.ok(muzzle - (along + 1.75) > 3, `포구까지 여유가 3 m도 안 된다: ${muzzle - along - 1.75}`);
+  });
+
+  it("ψ = 90°에서도 성립한다 — 회전축에 의존하지 않는 관계다", () => {
+    const [along, below] = inBore({ ...LAUNCH, azimuth: 90 * D2R });
+    const [along0, below0] = inBore(LAUNCH);
+    near(along, along0, "관축 방향", 1e-9);
+    near(below, below0, "관축 아래", 1e-9);
   });
 });
 

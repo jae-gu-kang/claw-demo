@@ -539,8 +539,12 @@ export class SceneController {
       const d = w.length > 2 && num(w[2]) !== null ? -num(w[2])! : -rwElev;
       marks.push({ ne: [n0, e0, d], kind: "waypoint", radius: acceptRadius });
     }
-    // 출발점은 **성한 첫 표본**에만 찍는다 — 결측이면 원점에 초록 점을 지어내게 된다.
-    for (let i = 0; i < this.n; i++) {
+    // 출발점은 **성한 첫 표본**에만 찍는다 — 결측이면 원점에 초록 점을 지어내게 된다. 관에서 발사하는 결과는 안 찍는다 —
+    // 출발점이 관 속이라 발사관이 그 자리를 보여 주고, 반경 0.8 m 공은 관축 아래 0.45 m인 기체 원점에서 관 바닥 밖으로
+    // 비어져 나왔다(v2.04). 발사관 모델이 없으면 찍는다
+    const lp = launcherPose(body.meta?.launch);
+    const startInCanister = this.launcher != null && lp != null && startsInCanister(body.signals.on_rail?.[0]);
+    for (let i = 0; i < this.n && !startInCanister; i++) {
       const s0 = sampleAt(body.signals, i);
       if (s0) { marks.push({ ne: s0, kind: "start", radius: 0 }); break; }
     }
@@ -552,7 +556,6 @@ export class SceneController {
     // 캡션도 그쪽 상태에서 매번 만든다(`vehicleNotes`, emitNotes)
 
     // --- 발사관 ---
-    const lp = launcherPose(body.meta?.launch);
     if (this.launcher) {
       const site: Vec3 = [0, 0, -(num(body.meta?.runway?.elevation) ?? 0)];
       showLauncher(this.launcher, site, lp);

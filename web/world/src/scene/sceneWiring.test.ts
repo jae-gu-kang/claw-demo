@@ -184,6 +184,11 @@ describe("SceneController 배선 — 발사관 문과 발사 전주", () => {
     assert.match(fn("draw"), /applyLauncherDoors\(this\.launcher, this\.doorsOn \? doorOpenFraction\(i, this\.preT\) : 1\)/);
   });
 
+  it("관에서 발사하는 결과엔 출발점 공을 안 찍는다 — 관 속 기체 원점의 0.8 m 공이 관 바닥 밖으로 비어져 나왔다", () => {
+    assert.match(src, /const startInCanister = this\.launcher != null && lp != null && startsInCanister\(body\.signals\.on_rail\?\.\[0\]\);/);
+    assert.match(src, /for \(let i = 0; i < this\.n && !startInCanister; i\+\+\) \{\s*const s0 = sampleAt\(body\.signals, i\);\s*if \(s0\) \{ marks\.push\(\{ ne: s0, kind: "start"/);
+  });
+
   it("결과를 읽을 때 문을 닫을지 정하고, 문이 있으면 캡션이 표시용임을 밝힌다", () => {
     assert.match(src, /startsInCanister\(body\.signals\.on_rail\?\.\[0\]\)/);
     assert.match(src, /this\.preT = this\.doorsOn \? 0 : PRELUDE_S;/);
